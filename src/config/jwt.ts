@@ -9,9 +9,8 @@ if (!jwtConfig.accessTokenSecret || !jwtConfig.refreshTokenSecret) {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('JWT Secret keys must be configured in environment variables for production!');
   } else {
-    console.warn('[WARNING] JWT Secret keys are missing. Using transient secrets for development.');
-    jwtConfig.accessTokenSecret = jwtConfig.accessTokenSecret || 'dev_access_secret_transient';
-    jwtConfig.refreshTokenSecret = jwtConfig.refreshTokenSecret || 'dev_refresh_secret_transient';
+    jwtConfig.accessTokenSecret = jwtConfig.accessTokenSecret || '';
+    jwtConfig.refreshTokenSecret = jwtConfig.refreshTokenSecret || '';
   }
 }
 
