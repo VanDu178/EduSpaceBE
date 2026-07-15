@@ -10,14 +10,8 @@ import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
+import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
 
-// Cấu hình cookie cho Refresh Token
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  maxAge: 30 * 24 * 60 * 60 * 1000 // 30 ngày
-};
 
 /**
  * Đăng ký tài khoản Admin mới.
@@ -63,7 +57,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       email,
       password: hashedPassword,
       name,
-      role: role || undefined
+      role: role || "client"
     }
   });
 
@@ -138,7 +132,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   });
 
   // Gửi Refresh Token về qua HttpOnly Cookie
-  res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+  res.cookie('refreshToken', refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
 
   // Trả Access Token về qua JSON body
   const { password: _, ...userWithoutPassword } = user;
@@ -174,7 +168,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     await prisma.refreshToken.deleteMany({
       where: { token: refreshToken }
     });
-    res.clearCookie('refreshToken', COOKIE_OPTIONS);
+    res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
       'Unauthorized: Invalid or expired refresh token',
@@ -194,7 +188,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     await prisma.refreshToken.deleteMany({
       where: { userId: decoded.userId }
     });
-    res.clearCookie('refreshToken', COOKIE_OPTIONS);
+    res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
       'Forbidden: Security alert. Refresh token reuse detected',
@@ -208,7 +202,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     await prisma.refreshToken.delete({
       where: { id: savedToken.id }
     });
-    res.clearCookie('refreshToken', COOKIE_OPTIONS);
+    res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
       'Unauthorized: Refresh token has expired',
@@ -236,7 +230,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
   ]);
 
   // Gửi cookie mới chứa Refresh Token mới
-  res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS);
+  res.cookie('refreshToken', newRefreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
 
   return sendSuccess(
     res,
@@ -259,7 +253,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Xóa cookie ở trình duyệt
-  res.clearCookie('refreshToken', COOKIE_OPTIONS);
+  res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
   return sendSuccess(res, null, 'Logged out successfully');
 });

@@ -13,11 +13,12 @@ interface UserPayload {
  */
 export const generateAccessToken = (user: UserPayload): string => {
   return jwt.sign(
-    { userId: user.id, role: user.role || 'client' },
-    jwtConfig.accessTokenSecret,
-    { expiresIn: jwtConfig.accessTokenExpire } as SignOptions
+    { userId: user.id, role: user.role || 'client' }, // Dữ liệu đính kèm bên trong token
+    jwtConfig.accessTokenSecret,                      // Dùng khóa bí mật Access Token để ký
+    { expiresIn: jwtConfig.accessTokenExpire } as SignOptions // Thời gian hết hạn (15 phút)
   );
 };
+
 
 /**
  * Sinh Refresh Token cho người dùng.
@@ -25,11 +26,12 @@ export const generateAccessToken = (user: UserPayload): string => {
  */
 export const generateRefreshToken = (user: UserPayload): string => {
   return jwt.sign(
-    { userId: user.id },
-    jwtConfig.refreshTokenSecret,
-    { expiresIn: jwtConfig.refreshTokenExpire } as SignOptions
+    { userId: user.id },                             // Chỉ đính kèm userId để tối ưu bảo mật
+    jwtConfig.refreshTokenSecret,                     // Dùng khóa bí mật Refresh Token để ký
+    { expiresIn: jwtConfig.refreshTokenExpire } as SignOptions // Thời gian hết hạn (30 ngày)
   );
 };
+
 
 /**
  * Xác thực Access Token.
@@ -38,9 +40,10 @@ export const verifyAccessToken = (token: string): any => {
   try {
     return jwt.verify(token, jwtConfig.accessTokenSecret);
   } catch (error) {
-    return null;
+    return null; // Nếu token bị chỉnh sửa, hết hạn, hoặc sai chữ ký, trả về null
   }
 };
+
 
 /**
  * Xác thực Refresh Token.
