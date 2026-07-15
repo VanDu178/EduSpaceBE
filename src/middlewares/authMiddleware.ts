@@ -7,7 +7,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import type { Request } from 'express';
 
 export interface AuthenticatedRequest extends Request {
-  user?: Omit<User, 'password'> & { role: string };
+  user?: Omit<User, 'password'>;
 }
 
 /**
@@ -50,10 +50,7 @@ export const authMiddleware = asyncHandler(
 
     // Gán thông tin user (loại bỏ password) vào request
     const { password, ...userWithoutPassword } = user;
-    req.user = {
-      ...userWithoutPassword,
-      role: decoded.role || 'admin'
-    };
+    req.user = userWithoutPassword;
 
     next();
   }

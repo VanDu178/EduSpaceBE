@@ -1,18 +1,19 @@
+import type { Role } from '@prisma/client';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import jwtConfig from '../config/jwt';
 
 interface UserPayload {
   id: number;
-  role?: string;
+  role?: Role;
 }
 
 /**
  * Sinh Access Token cho người dùng.
- * Payload chứa id và role (mặc định là 'admin').
+ * Payload chứa id và role (mặc định là 'client').
  */
 export const generateAccessToken = (user: UserPayload): string => {
   return jwt.sign(
-    { userId: user.id, role: user.role || 'admin' },
+    { userId: user.id, role: user.role || 'client' },
     jwtConfig.accessTokenSecret,
     { expiresIn: jwtConfig.accessTokenExpire } as SignOptions
   );

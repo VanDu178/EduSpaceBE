@@ -16,7 +16,7 @@ export const getPosts = asyncHandler(async (req: Request, res: Response) => {
       createdAt: 'desc'
     }
   });
-  return sendSuccess(res, { posts }, 'Get posts list successfully');
+  return sendSuccess(res, { posts }, 'Lấy danh sách bài viết thành công');
 });
 
 /**
@@ -27,7 +27,7 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
 
   if (!title) {
     throw new AppError(
-      'Title is required',
+      'Tiêu đề bài viết là bắt buộc.',
       400,
       'VALIDATION_ERROR',
       { title: ['Tiêu đề bài viết là bắt buộc.'] }
@@ -62,7 +62,7 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
     }
   });
 
-  return sendSuccess(res, { post }, 'Post created successfully', 201);
+  return sendSuccess(res, { post }, 'Tạo bài viết mới thành công', 201);
 });
 
 /**
@@ -73,7 +73,7 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
   const postId = parseInt(id as string, 10);
 
   if (isNaN(postId)) {
-    throw new AppError('Invalid post ID', 400, 'VALIDATION_ERROR');
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
   // Kiểm tra xem bài viết có tồn tại không
@@ -82,7 +82,7 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
   });
 
   if (!existingPost) {
-    throw new AppError('Post not found', 404, 'NOT_FOUND');
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
   }
 
   // Thực hiện xóa
@@ -90,5 +90,5 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
     where: { id: postId }
   });
 
-  return sendSuccess(res, null, 'Post deleted successfully');
+  return sendSuccess(res, null, 'Bài viết đã được xóa thành công');
 });

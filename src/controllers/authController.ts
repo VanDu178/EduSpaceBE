@@ -23,16 +23,16 @@ const COOKIE_OPTIONS = {
  * Đăng ký tài khoản Admin mới.
  */
 export const register = asyncHandler(async (req: Request, res: Response) => {
-  const { email, password, name } = req.body;
+  const { email, password, name, role } = req.body;
 
   // Validation đơn giản
   if (!email || !password) {
     const fieldErrors: Record<string, string[]> = {};
     if (!email) fieldErrors.email = ['Email là bắt buộc.'];
     if (!password) fieldErrors.password = ['Mật khẩu là bắt buộc.'];
-    
+
     throw new AppError(
-      'Email and password are required',
+      'Email và mật khẩu là bắt buộc.',
       400,
       'VALIDATION_ERROR',
       fieldErrors
@@ -46,7 +46,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   if (existingUser) {
     throw new AppError(
-      'Email is already registered',
+      'Email đã được đăng ký sử dụng trong hệ thống.',
       400,
       'DUPLICATE_RESOURCE',
       { email: ['Email đã được đăng ký sử dụng trong hệ thống.'] }
@@ -62,17 +62,18 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     data: {
       email,
       password: hashedPassword,
-      name
+      name,
+      role: role || undefined
     }
   });
 
   // Trả về kết quả (không kèm mật khẩu)
   const { password: _, ...userWithoutPassword } = user;
-  
+
   return sendSuccess(
     res,
     { user: userWithoutPassword },
-    'Admin user registered successfully',
+    'Đăng ký tài khoản thành công',
     201
   );
 });
@@ -87,7 +88,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     const fieldErrors: Record<string, string[]> = {};
     if (!email) fieldErrors.email = ['Email là bắt buộc.'];
     if (!password) fieldErrors.password = ['Mật khẩu là bắt buộc.'];
-    
+
     throw new AppError(
       'Email and password are required',
       400,
@@ -141,15 +142,12 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   // Trả Access Token về qua JSON body
   const { password: _, ...userWithoutPassword } = user;
-  
+
   return sendSuccess(
     res,
     {
       accessToken,
-      user: {
-        ...userWithoutPassword,
-        role: 'admin'
-      }
+      user: userWithoutPassword
     },
     'Login successful'
   );
@@ -177,7 +175,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
       where: { token: refreshToken }
     });
     res.clearCookie('refreshToken', COOKIE_OPTIONS);
-    
+
     throw new AppError(
       'Unauthorized: Invalid or expired refresh token',
       401,
@@ -197,7 +195,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
       where: { userId: decoded.userId }
     });
     res.clearCookie('refreshToken', COOKIE_OPTIONS);
-    
+
     throw new AppError(
       'Forbidden: Security alert. Refresh token reuse detected',
       403,
@@ -211,7 +209,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
       where: { id: savedToken.id }
     });
     res.clearCookie('refreshToken', COOKIE_OPTIONS);
-    
+
     throw new AppError(
       'Unauthorized: Refresh token has expired',
       401,
