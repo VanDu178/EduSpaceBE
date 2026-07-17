@@ -8,15 +8,57 @@ import { sendSuccess } from '../utils/responseHelper';
  * Lấy danh sách tất cả các bài viết (Public).
  */
 export const getPosts = asyncHandler(async (req: Request, res: Response) => {
-  const posts = await prisma.post.findMany({
-    include: {
-      postType: true
+  const page = parseInt(req.query.page as string, 10) || 1;
+  const limit = parseInt(req.query.limit as string, 10) || 10;
+  const keyword = req.query.keyword as string;
+  const postType = req.query.postType as string;
+
+  const where: any = {};
+
+  if (keyword) {
+    where.title = {
+      contains: keyword
+    };
+  }
+
+  if (postType && postType !== 'ALL') {
+    where.postType = {
+      code: postType
+    };
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [posts, total] = await Promise.all([
+    prisma.post.findMany({
+      where,
+      include: {
+        postType: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      skip,
+      take: limit
+    }),
+    prisma.post.count({ where })
+  ]);
+
+  const totalPages = Math.ceil(total / limit);
+
+  return sendSuccess(
+    res,
+    {
+      posts,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      }
     },
-    orderBy: {
-      createdAt: 'desc'
-    }
-  });
-  return sendSuccess(res, { posts }, 'Lấy danh sách bài viết thành công');
+    'Lấy danh sách bài viết thành công'
+  );
 });
 
 /**

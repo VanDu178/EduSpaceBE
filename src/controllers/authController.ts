@@ -84,7 +84,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     if (!password) fieldErrors.password = ['Mật khẩu là bắt buộc.'];
 
     throw new AppError(
-      'Email and password are required',
+      'Email và mật khẩu là bắt buộc.',
       400,
       'VALIDATION_ERROR',
       fieldErrors
@@ -155,7 +155,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
 
   if (!refreshToken) {
     throw new AppError(
-      'Unauthorized: Refresh token is missing',
+      'Refresh token không tồn tại.',
       401,
       'REFRESH_TOKEN_MISSING'
     );
@@ -171,7 +171,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
-      'Unauthorized: Invalid or expired refresh token',
+      'Refresh token hết hạn hoặc không hợp lệ.',
       401,
       'INVALID_REFRESH_TOKEN'
     );
@@ -191,7 +191,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
-      'Forbidden: Security alert. Refresh token reuse detected',
+      'Phát hiện tấn công Replay Attack. Refresh token không hợp lệ.',
       403,
       'REFRESH_TOKEN_REUSE'
     );
@@ -205,7 +205,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
     throw new AppError(
-      'Unauthorized: Refresh token has expired',
+      'Refresh token hết hạn.',
       401,
       'EXPIRED_REFRESH_TOKEN'
     );
@@ -235,7 +235,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
   return sendSuccess(
     res,
     { accessToken: newAccessToken },
-    'Token refreshed successfully'
+    'Token refresh thành công'
   );
 });
 
@@ -255,12 +255,12 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   // Xóa cookie ở trình duyệt
   res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
 
-  return sendSuccess(res, null, 'Logged out successfully');
+  return sendSuccess(res, null, 'Đăng xuất thành công');
 });
 
 /**
  * Lấy thông tin user hiện tại.
  */
 export const getMe = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  return sendSuccess(res, { user: req.user }, 'Get user profile successfully');
+  return sendSuccess(res, { user: req.user }, 'Lấy thông tin user thành công');
 });
