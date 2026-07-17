@@ -52,6 +52,8 @@ model Post {
   id         Int      @id @default(autoincrement())
   title      String
   content    String?  @db.Text
+  summary    String?  @db.Text
+  thumbnail  String?  @db.LongText
   published  Boolean  @default(false)
   postTypeId Int      @map("post_type_id")
   createdAt  DateTime @default(now()) @map("created_at")

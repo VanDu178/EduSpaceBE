@@ -65,7 +65,7 @@ export const getPosts = asyncHandler(async (req: Request, res: Response) => {
  * Tạo bài viết mới (Protected).
  */
 export const createPost = asyncHandler(async (req: Request, res: Response) => {
-  const { title, content, published } = req.body;
+  const { title, content, published, postTypeId, summary, thumbnail } = req.body;
 
   if (!title) {
     throw new AppError(
@@ -76,19 +76,27 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
     );
   }
 
-  // Đảm bảo có ít nhất một PostType mặc định
-  let postType = await prisma.postType.findUnique({
-    where: { code: 'GENERAL' }
+  if (!postTypeId) {
+    throw new AppError(
+      'Thể loại bài viết là bắt buộc.',
+      400,
+      'VALIDATION_ERROR',
+      { postTypeId: ['Thể loại bài viết là bắt buộc.'] }
+    );
+  }
+
+  // Kiểm tra xem postType có tồn tại hay không
+  const postType = await prisma.postType.findUnique({
+    where: { id: Number(postTypeId) }
   });
 
   if (!postType) {
-    postType = await prisma.postType.create({
-      data: {
-        name: 'Chung',
-        code: 'GENERAL',
-        description: 'Danh mục bài viết chung'
-      }
-    });
+    throw new AppError(
+      'Thể loại bài viết không tồn tại.',
+      400,
+      'VALIDATION_ERROR',
+      { postTypeId: ['Thể loại bài viết không tồn tại.'] }
+    );
   }
 
   // Tạo bài viết mới
@@ -97,7 +105,9 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
       title,
       content,
       published: published || false,
-      postTypeId: postType.id
+      postTypeId: postType.id,
+      summary,
+      thumbnail
     },
     include: {
       postType: true
@@ -105,6 +115,92 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
   });
 
   return sendSuccess(res, { post }, 'Tạo bài viết mới thành công', 201);
+});
+
+/**
+ * Cập nhật bài viết (Protected).
+ */
+export const updatePost = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const postId = parseInt(id as string, 10);
+  const { title, content, published, postTypeId, summary, thumbnail } = req.body;
+
+  if (isNaN(postId)) {
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  // Kiểm tra xem bài viết có tồn tại không
+  const existingPost = await prisma.post.findUnique({
+    where: { id: postId }
+  });
+
+  if (!existingPost) {
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  const updateData: any = {};
+
+  if (title !== undefined) {
+    if (!title) {
+      throw new AppError(
+        'Tiêu đề bài viết là bắt buộc.',
+        400,
+        'VALIDATION_ERROR',
+        { title: ['Tiêu đề bài viết là bắt buộc.'] }
+      );
+    }
+    updateData.title = title;
+  }
+
+  if (content !== undefined) {
+    updateData.content = content;
+  }
+
+  if (published !== undefined) {
+    updateData.published = published;
+  }
+
+  if (postTypeId !== undefined) {
+    if (!postTypeId) {
+      throw new AppError(
+        'Thể loại bài viết là bắt buộc.',
+        400,
+        'VALIDATION_ERROR',
+        { postTypeId: ['Thể loại bài viết là bắt buộc.'] }
+      );
+    }
+    const postType = await prisma.postType.findUnique({
+      where: { id: Number(postTypeId) }
+    });
+    if (!postType) {
+      throw new AppError(
+        'Thể loại bài viết không tồn tại.',
+        400,
+        'VALIDATION_ERROR',
+        { postTypeId: ['Thể loại bài viết không tồn tại.'] }
+      );
+    }
+    updateData.postTypeId = postType.id;
+  }
+
+  if (summary !== undefined) {
+    updateData.summary = summary;
+  }
+
+  if (thumbnail !== undefined) {
+    updateData.thumbnail = thumbnail;
+  }
+
+  // Cập nhật bài viết
+  const post = await prisma.post.update({
+    where: { id: postId },
+    data: updateData,
+    include: {
+      postType: true
+    }
+  });
+
+  return sendSuccess(res, { post }, 'Cập nhật bài viết thành công');
 });
 
 /**
@@ -134,3 +230,72 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
 
   return sendSuccess(res, null, 'Bài viết đã được xóa thành công');
 });
+
+/**
+ * Cập nhật trạng thái (published) của bài viết (Protected).
+ */
+export const updatePostStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const postId = parseInt(id as string, 10);
+  const { published } = req.body;
+
+  if (isNaN(postId)) {
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  if (published === undefined || typeof published !== 'boolean') {
+    throw new AppError(
+      'Trạng thái bài viết là bắt buộc và phải là kiểu boolean.',
+      400,
+      'VALIDATION_ERROR',
+      { published: ['Trạng thái bài viết là bắt buộc và phải là kiểu boolean.'] }
+    );
+  }
+
+  // Kiểm tra xem bài viết có tồn tại không
+  const existingPost = await prisma.post.findUnique({
+    where: { id: postId }
+  });
+
+  if (!existingPost) {
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  // Cập nhật trạng thái
+  const post = await prisma.post.update({
+    where: { id: postId },
+    data: { published },
+    include: {
+      postType: true
+    }
+  });
+
+  return sendSuccess(res, { post }, 'Cập nhật trạng thái bài viết thành công');
+});
+
+/**
+ * Lấy chi tiết một bài viết theo ID.
+ */
+export const getPostById = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const postId = parseInt(id as string, 10);
+
+  if (isNaN(postId)) {
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: {
+      postType: true
+    }
+  });
+
+  if (!post) {
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  return sendSuccess(res, { post }, 'Lấy chi tiết bài viết thành công');
+});
+
+

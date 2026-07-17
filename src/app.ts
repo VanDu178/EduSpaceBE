@@ -16,8 +16,9 @@ app.use(cors({
 // Sử dụng cookie-parser để xử lý HttpOnly Cookies
 app.use(cookieParser());
 
-// Middleware phân tích body dạng JSON trong request.
-app.use(express.json());
+// Middleware phân tích body dạng JSON trong request (hỗ trợ payload ảnh Base64 lên tới 10MB)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Đăng ký routes
 app.use('/api', apiRouter);
