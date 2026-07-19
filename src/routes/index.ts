@@ -6,7 +6,7 @@ import userRoutes from './userRoutes';
 
 const apiRouter = express.Router();
 
-// Đăng ký các phân hệ route con
+// Đăng ký các route con
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/posts', postRoutes);
 apiRouter.use('/post-types', postTypeRoutes);

@@ -143,7 +143,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       accessToken,
       user: userWithoutPassword
     },
-    'Login successful'
+    'Đăng nhập thành công!'
   );
 });
 
