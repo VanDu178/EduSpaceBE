@@ -12,6 +12,7 @@ export const getPosts = asyncHandler(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string, 10) || 10;
   const keyword = req.query.keyword as string;
   const postType = req.query.postType as string;
+  const published = req.query.published as string;
 
   const where: any = {};
 
@@ -25,6 +26,10 @@ export const getPosts = asyncHandler(async (req: Request, res: Response) => {
     where.postType = {
       code: postType
     };
+  }
+
+  if (published && published !== 'ALL') {
+    where.published = published === 'true';
   }
 
   const skip = (page - 1) * limit;
