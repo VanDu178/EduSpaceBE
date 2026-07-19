@@ -14,6 +14,7 @@ export const getUsers = asyncHandler(async (req: AuthenticatedRequest, res: Resp
   const limit = parseInt(req.query.limit as string, 10) || 10;
   const keyword = req.query.keyword as string;
   const role = req.query.role as string;
+  const status = req.query.status as string;
 
   const where: any = {};
 
@@ -26,6 +27,10 @@ export const getUsers = asyncHandler(async (req: AuthenticatedRequest, res: Resp
 
   if (role && role !== 'ALL') {
     where.role = role;
+  }
+
+  if (status && status !== 'ALL') {
+    where.status = status;
   }
 
   const skip = (page - 1) * limit;
