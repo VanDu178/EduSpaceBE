@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUsers, createUser, updateUser, resetPassword } from '../controllers/userController';
+import { getUsers, createUser, updateUser, resetPassword, toggleUserStatus } from '../controllers/userController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import type { Response, NextFunction } from 'express';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
@@ -23,6 +23,7 @@ router.use(adminOnly as any);
 router.get('/', getUsers as any);
 router.post('/', createUser as any);
 router.put('/:id', updateUser as any);
+router.put('/:id/status', toggleUserStatus as any);
 router.post('/:id/reset-password', resetPassword as any);
 
 export default router;

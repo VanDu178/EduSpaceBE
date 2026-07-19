@@ -48,6 +48,15 @@ export const authMiddleware = asyncHandler(
       );
     }
 
+    // Kiểm tra tài khoản có bị khóa hay không
+    if (user.status === 'locked') {
+      throw new AppError(
+        'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+        401,
+        'UNAUTHORIZED'
+      );
+    }
+
     // Gán thông tin user (loại bỏ password) vào request
     const { password, ...userWithoutPassword } = user;
     req.user = userWithoutPassword;

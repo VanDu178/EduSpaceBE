@@ -38,6 +38,7 @@ export const getUsers = asyncHandler(async (req: AuthenticatedRequest, res: Resp
         email: true,
         name: true,
         role: true,
+        status: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -138,6 +139,7 @@ export const createUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
       email: true,
       name: true,
       role: true,
+      status: true,
       createdAt: true,
       updatedAt: true
     }
@@ -202,6 +204,7 @@ export const updateUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
       email: true,
       name: true,
       role: true,
+      status: true,
       createdAt: true,
       updatedAt: true
     }
@@ -283,4 +286,59 @@ Content:
     },
     'Đặt lại mật khẩu thành công và thông tin đã được gửi về email đăng ký.'
   );
+});
+
+/**
+ * Khóa hoặc mở khóa tài khoản người dùng (Admin only).
+ */
+export const toggleUserStatus = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = parseInt(req.params.id as string, 10);
+  const { status } = req.body;
+
+  if (isNaN(userId)) {
+    throw new AppError('ID tài khoản không hợp lệ', 400, 'BAD_REQUEST');
+  }
+
+  if (!status || (status !== 'active' && status !== 'locked')) {
+    throw new AppError('Trạng thái không hợp lệ. Chỉ chấp nhận "active" hoặc "locked".', 400, 'BAD_REQUEST');
+  }
+
+  // Không cho phép tự khóa chính bản thân
+  if (req.user?.id === userId && status === 'locked') {
+    throw new AppError('Không được phép tự khóa tài khoản của chính mình.', 400, 'BAD_REQUEST');
+  }
+
+  // Kiểm tra user tồn tại
+  const targetUser = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!targetUser) {
+    throw new AppError('Không tìm thấy tài khoản người dùng', 404, 'NOT_FOUND');
+  }
+
+  // Cập nhật trạng thái
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: { status },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  // Nếu tài khoản bị khóa, thu hồi (xóa) toàn bộ refresh token để buộc logout ngay lập tức
+  if (status === 'locked') {
+    await prisma.refreshToken.deleteMany({
+      where: { userId }
+    });
+  }
+
+  const statusMsg = status === 'locked' ? 'Khóa tài khoản thành công' : 'Mở khóa tài khoản thành công';
+  return sendSuccess(res, { user: updatedUser }, statusMsg);
 });

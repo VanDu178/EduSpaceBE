@@ -104,6 +104,15 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     );
   }
 
+  // Kiểm tra tài khoản bị khóa
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      401,
+      'UNAUTHORIZED'
+    );
+  }
+
   // So khớp mật khẩu
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
@@ -213,6 +222,16 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
 
   // Thực hiện xoay vòng token (Token Rotation):
   const user = savedToken.user;
+
+  // Kiểm tra tài khoản bị khóa
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      401,
+      'UNAUTHORIZED'
+    );
+  }
+
   const newAccessToken = generateAccessToken(user);
   const newRefreshToken = generateRefreshToken(user);
 
