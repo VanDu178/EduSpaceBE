@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import { OAuth2Client } from 'google-auth-library';
 import prisma from '../config/db';
 import {
   generateAccessToken,
@@ -11,6 +12,8 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
 /**
@@ -122,6 +125,14 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // So khớp mật khẩu
+  if (!user.password) {
+    throw new AppError(
+      'Tài khoản này được đăng ký bằng Google. Vui lòng sử dụng đăng nhập bằng Google.',
+      401,
+      'INVALID_CREDENTIALS'
+    );
+  }
+
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
     throw new AppError(
@@ -291,3 +302,130 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 export const getMe = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   return sendSuccess(res, { user: req.user }, 'Lấy thông tin user thành công');
 });
+
+/**
+ * Đăng nhập / Đăng ký bằng Google OAuth Token (hỗ trợ idToken hoặc accessToken).
+ */
+export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
+  const { idToken, accessToken: googleAccessToken } = req.body;
+
+  if (!idToken && !googleAccessToken) {
+    throw new AppError('Google Token là bắt buộc.', 400, 'VALIDATION_ERROR');
+  }
+
+  let email: string | undefined;
+  let name: string | undefined;
+  let picture: string | undefined;
+  let googleId: string | undefined;
+
+  if (idToken) {
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (payload) {
+        email = payload.email;
+        name = payload.name;
+        picture = payload.picture;
+        googleId = payload.sub;
+      }
+    } catch (error) {
+      throw new AppError('Google ID Token không hợp lệ hoặc đã hết hạn.', 401, 'INVALID_CREDENTIALS');
+    }
+  } else if (googleAccessToken) {
+    try {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${googleAccessToken}` }
+      });
+      if (userInfoRes.ok) {
+        const payload: any = await userInfoRes.json();
+        email = payload.email;
+        name = payload.name;
+        picture = payload.picture;
+        googleId = payload.sub;
+      }
+    } catch (error) {
+      throw new AppError('Google Access Token không hợp lệ hoặc đã hết hạn.', 401, 'INVALID_CREDENTIALS');
+    }
+  }
+
+  if (!email || !googleId) {
+    throw new AppError('Không thể xác thực thông tin tài khoản Google.', 400, 'INVALID_CREDENTIALS');
+  }
+
+  // Tìm kiếm user theo googleId hoặc email
+  let user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { googleId },
+        { email }
+      ]
+    }
+  });
+
+
+  if (!user) {
+    // Tạo user mới nếu chưa tồn tại
+    user = await prisma.user.create({
+      data: {
+        email,
+        name: name || null,
+        avatarUrl: picture || null,
+        googleId,
+        provider: 'google',
+        role: 'client',
+        status: 'active'
+      }
+    });
+  } else {
+    // Nếu user đã tồn tại, liên kết googleId và avatar (nếu chưa có)
+    const updateData: any = {};
+    if (!user.googleId) updateData.googleId = googleId;
+    if (!user.avatarUrl && picture) updateData.avatarUrl = picture;
+
+    if (Object.keys(updateData).length > 0) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: updateData
+      });
+    }
+  }
+
+  // Kiểm tra nếu tài khoản bị khóa
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      401,
+      'UNAUTHORIZED'
+    );
+  }
+
+  // Sinh Access Token và Refresh Token
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30);
+
+  await prisma.refreshToken.create({
+    data: {
+      token: refreshToken,
+      userId: user.id,
+      expiresAt
+    }
+  });
+
+  // Thiết lập cookie chứa Refresh Token
+  res.cookie('refreshToken', refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+
+  const { password: _, ...userWithoutPassword } = user;
+
+  return sendSuccess(
+    res,
+    { accessToken, user: userWithoutPassword },
+    'Đăng nhập bằng Google thành công'
+  );
+});
+

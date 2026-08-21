@@ -20,10 +20,13 @@ enum UserStatus {
 model User {
   id            Int            @id @default(autoincrement())
   email         String         @unique
-  password      String
+  password      String?
   name          String?
   role          Role           @default(client)
   status        UserStatus     @default(active)
+  googleId      String?        @unique @map("google_id")
+  avatarUrl     String?        @map("avatar_url")
+  provider      String         @default("credentials")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   refreshTokens RefreshToken[]

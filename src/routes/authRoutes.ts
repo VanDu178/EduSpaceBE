@@ -2,6 +2,7 @@ import express from 'express';
 import {
   register,
   login,
+  googleLogin,
   tokenRefresh,
   logout,
   getMe
@@ -17,6 +18,9 @@ router.post('/register', register as express.RequestHandler);
 
 // Route Đăng nhập (Public)
 router.post('/login', login as express.RequestHandler);
+
+// Route Đăng nhập bằng Google (Public)
+router.post('/google', googleLogin as express.RequestHandler);
 
 // Route Refresh Token (Public - gửi kèm Cookie)
 router.post('/refresh', tokenRefresh as express.RequestHandler);
