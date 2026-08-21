@@ -12,8 +12,13 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
+import { sendResetPasswordEmail } from '../utils/emailService';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Bộ nhớ tạm thời lưu mã OTP reset password (Hết hạn sau 10 phút)
+const otpStore = new Map<string, { otp: string; expiresAt: number }>();
+
 
 
 /**
@@ -428,4 +433,154 @@ export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
     'Đăng nhập bằng Google thành công'
   );
 });
+
+/**
+ * Yêu cầu mã khôi phục mật khẩu (Forgot Password - Public).
+ */
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = req.body;
+
+  if (!email) {
+    throw new AppError('Email là bắt buộc.', 400, 'VALIDATION_ERROR', { email: ['Email là bắt buộc.'] });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email }
+  });
+
+  if (!user) {
+    throw new AppError('Email không tồn tại trong hệ thống.', 404, 'NOT_FOUND', { email: ['Email không tồn tại trong hệ thống.'] });
+  }
+
+  if (user.status === 'locked') {
+    throw new AppError('Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.', 401, 'UNAUTHORIZED');
+  }
+
+  // Tạo mã OTP 6 chữ số ngẫu nhiên
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 phút
+
+  otpStore.set(email, { otp, expiresAt });
+
+  console.log(`[FORGOT PASSWORD OTP] Mã OTP đặt lại mật khẩu cho ${email} là: ${otp}`);
+
+  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+  const loginUrl = `${clientUrl}/login`;
+
+  await sendResetPasswordEmail({
+    to: user.email,
+    name: user.name,
+    newPassword: `Mã OTP xác thực: ${otp}`,
+    loginUrl
+  });
+
+  return sendSuccess(
+    res,
+    { email, devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined },
+    'Mã xác nhận khôi phục mật khẩu đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư!'
+  );
+});
+
+/**
+ * Đặt lại mật khẩu bằng mã OTP (Reset Password - Public).
+ */
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { email, otp, newPassword } = req.body;
+
+  console.log("das")
+
+  if (!email || !otp || !newPassword) {
+    const fieldErrors: Record<string, string[]> = {};
+    if (!email) fieldErrors.email = ['Email là bắt buộc.'];
+    if (!otp) fieldErrors.otp = ['Mã OTP là bắt buộc.'];
+    if (!newPassword) fieldErrors.newPassword = ['Mật khẩu mới là bắt buộc.'];
+    throw new AppError('Vui lòng điền đầy đủ thông tin yêu cầu.', 400, 'VALIDATION_ERROR', fieldErrors);
+  }
+
+  if (newPassword.length < 8) {
+    throw new AppError('Mật khẩu mới phải chứa ít nhất 8 ký tự.', 400, 'VALIDATION_ERROR', {
+      newPassword: ['Mật khẩu mới phải chứa ít nhất 8 ký tự.']
+    });
+  }
+
+  const storedData = otpStore.get(email);
+  if (!storedData) {
+    throw new AppError('Yêu cầu OTP không tồn tại hoặc đã hết hạn. Vui lòng gửi lại yêu cầu.', 400, 'INVALID_OTP');
+  }
+
+  if (Date.now() > storedData.expiresAt) {
+    otpStore.delete(email);
+    throw new AppError('Mã OTP đã hết hạn. Vui lòng lấy mã mới.', 400, 'EXPIRED_OTP');
+  }
+
+  if (storedData.otp !== otp.trim()) {
+    throw new AppError('Mã OTP xác thực không chính xác. Vui lòng kiểm tra lại!', 400, 'INVALID_OTP');
+  }
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    throw new AppError('Không tìm thấy tài khoản người dùng.', 404, 'NOT_FOUND');
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword }
+  });
+
+  // Xóa OTP khỏi store sau khi dùng thành công
+  otpStore.delete(email);
+
+  return sendSuccess(res, null, 'Đặt lại mật khẩu thành công! Vui lòng đăng nhập với mật khẩu mới.');
+});
+
+/**
+ * Đổi mật khẩu tài khoản (Change Password - Protected).
+ */
+export const changePassword = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { oldPassword, newPassword } = req.body;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw new AppError('Yêu cầu xác thực tài khoản.', 401, 'UNAUTHORIZED');
+  }
+
+  if (!oldPassword || !newPassword) {
+    const fieldErrors: Record<string, string[]> = {};
+    if (!oldPassword) fieldErrors.oldPassword = ['Mật khẩu hiện tại là bắt buộc.'];
+    if (!newPassword) fieldErrors.newPassword = ['Mật khẩu mới là bắt buộc.'];
+    throw new AppError('Vui lòng nhập đầy đủ mật khẩu.', 400, 'VALIDATION_ERROR', fieldErrors);
+  }
+
+  if (newPassword.length < 8) {
+    throw new AppError('Mật khẩu mới phải chứa ít nhất 8 ký tự.', 400, 'VALIDATION_ERROR', {
+      newPassword: ['Mật khẩu mới phải chứa ít nhất 8 ký tự.']
+    });
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new AppError('Không tìm thấy tài khoản người dùng.', 404, 'NOT_FOUND');
+  }
+
+  if (!user.password) {
+    throw new AppError('Tài khoản này được đăng ký bằng Google, không có mật khẩu ban đầu để thay đổi.', 400, 'BAD_REQUEST');
+  }
+
+  const isPasswordMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isPasswordMatch) {
+    throw new AppError('Mật khẩu hiện tại không chính xác.', 400, 'INVALID_CREDENTIALS', {
+      oldPassword: ['Mật khẩu hiện tại không chính xác.']
+    });
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword }
+  });
+
+  return sendSuccess(res, null, 'Đổi mật khẩu thành công!');
+});
+
 
