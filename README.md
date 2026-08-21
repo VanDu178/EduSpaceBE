@@ -1,6 +1,6 @@
-# EduSpace Backend (EduSpaceBE)
+# TradeVerse Backend (TradeVerseBE)
 
-Dự án Backend cung cấp API cho hệ thống quản lý học tập/không gian giáo dục **EduSpace**. 
+Dự án Backend cung cấp API cho hệ thống **TradeVerse**. 
 
 ## 🛠 Công nghệ sử dụng
 - **Runtime:** Node.js (Express.js)

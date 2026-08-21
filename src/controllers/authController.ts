@@ -18,7 +18,6 @@ import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
  */
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { email, password, name, role } = req.body;
-
   // Validation đơn giản
   if (!email || !password) {
     const fieldErrors: Record<string, string[]> = {};
@@ -30,6 +29,15 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       400,
       'VALIDATION_ERROR',
       fieldErrors
+    );
+  }
+
+  if (password.length < 8) {
+    throw new AppError(
+      'Mật khẩu phải chứa ít nhất 8 ký tự.',
+      400,
+      'VALIDATION_ERROR',
+      { password: ['Mật khẩu phải chứa ít nhất 8 ký tự.'] }
     );
   }
 
@@ -259,7 +267,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
 });
 
 /**
- * Đăng logout.
+ * Đăng xuất.
  */
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = req.cookies;

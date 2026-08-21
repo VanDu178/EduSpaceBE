@@ -5,22 +5,22 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 
 /**
- * Lấy danh sách tất cả các thể loại bài viết (Protected).
+ * Lấy danh sách tất cả các thể loại blog (Protected).
  */
-export const getPostTypes = asyncHandler(async (req: Request, res: Response) => {
-  const types = await prisma.postType.findMany({
+export const getBlogTypes = asyncHandler(async (req: Request, res: Response) => {
+  const types = await prisma.blogType.findMany({
     orderBy: {
       name: 'asc'
     }
   });
 
-  return sendSuccess(res, types, 'Lấy danh sách thể loại thành công');
+  return sendSuccess(res, types, 'Lấy danh sách thể loại blog thành công');
 });
 
 /**
- * Tạo mới thể loại bài viết (Protected).
+ * Tạo mới thể loại blog (Protected).
  */
-export const createPostType = asyncHandler(async (req: Request, res: Response) => {
+export const createBlogType = asyncHandler(async (req: Request, res: Response) => {
   const { name, code, description } = req.body;
 
   if (!name || !code) {
@@ -38,7 +38,7 @@ export const createPostType = asyncHandler(async (req: Request, res: Response) =
   const normalizedCode = code.trim().toUpperCase();
 
   // Kiểm tra xem mã thể loại đã tồn tại chưa
-  const existing = await prisma.postType.findUnique({
+  const existing = await prisma.blogType.findUnique({
     where: { code: normalizedCode }
   });
 
@@ -51,7 +51,7 @@ export const createPostType = asyncHandler(async (req: Request, res: Response) =
     );
   }
 
-  const postType = await prisma.postType.create({
+  const blogType = await prisma.blogType.create({
     data: {
       name: name.trim(),
       code: normalizedCode,
@@ -59,13 +59,13 @@ export const createPostType = asyncHandler(async (req: Request, res: Response) =
     }
   });
 
-  return sendSuccess(res, postType, 'Tạo thể loại mới thành công', 201);
+  return sendSuccess(res, blogType, 'Tạo thể loại mới thành công', 201);
 });
 
 /**
- * Cập nhật thể loại bài viết (Protected).
+ * Cập nhật thể loại blog (Protected).
  */
-export const updatePostType = asyncHandler(async (req: Request, res: Response) => {
+export const updateBlogType = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const typeId = parseInt(id as string, 10);
   const { name, code, description } = req.body;
@@ -75,7 +75,7 @@ export const updatePostType = asyncHandler(async (req: Request, res: Response) =
   }
 
   // Kiểm tra thể loại có tồn tại không
-  const existing = await prisma.postType.findUnique({
+  const existing = await prisma.blogType.findUnique({
     where: { id: typeId }
   });
 
@@ -93,7 +93,7 @@ export const updatePostType = asyncHandler(async (req: Request, res: Response) =
     const normalizedCode = code.trim().toUpperCase();
     if (normalizedCode !== existing.code) {
       // Kiểm tra xem mã code mới đã bị trùng với loại khác chưa
-      const codeExists = await prisma.postType.findUnique({
+      const codeExists = await prisma.blogType.findUnique({
         where: { code: normalizedCode }
       });
       if (codeExists) {
@@ -112,7 +112,7 @@ export const updatePostType = asyncHandler(async (req: Request, res: Response) =
     updateData.description = description ? description.trim() : null;
   }
 
-  const updated = await prisma.postType.update({
+  const updated = await prisma.blogType.update({
     where: { id: typeId },
     data: updateData
   });
@@ -121,9 +121,9 @@ export const updatePostType = asyncHandler(async (req: Request, res: Response) =
 });
 
 /**
- * Xóa thể loại bài viết (Protected).
+ * Xóa thể loại blog (Protected).
  */
-export const deletePostType = asyncHandler(async (req: Request, res: Response) => {
+export const deleteBlogType = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const typeId = parseInt(id as string, 10);
 
@@ -131,7 +131,7 @@ export const deletePostType = asyncHandler(async (req: Request, res: Response) =
     throw new AppError('Thể loại không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  const existing = await prisma.postType.findUnique({
+  const existing = await prisma.blogType.findUnique({
     where: { id: typeId }
   });
 
@@ -140,19 +140,19 @@ export const deletePostType = asyncHandler(async (req: Request, res: Response) =
   }
 
   // KIỂM TRA RÀNG BUỘC: Đếm số lượng bài viết đang sử dụng thể loại này
-  const postCount = await prisma.post.count({
-    where: { postTypeId: typeId }
+  const blogCount = await prisma.blog.count({
+    where: { blogTypeId: typeId }
   });
 
-  if (postCount > 0) {
+  if (blogCount > 0) {
     throw new AppError(
-      `Không thể xóa thể loại này vì đang có ${postCount} bài viết sử dụng.`,
+      `Không thể xóa thể loại này vì đang có ${blogCount} bài viết sử dụng.`,
       400,
       'VALIDATION_ERROR'
     );
   }
 
-  await prisma.postType.delete({
+  await prisma.blogType.delete({
     where: { id: typeId }
   });
 

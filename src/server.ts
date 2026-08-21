@@ -9,5 +9,5 @@ const PORT = process.env.PORT || 5000;
 
 // Khởi chạy server lắng nghe kết nối.
 app.listen(PORT, () => {
-  console.log(`[EduSpaceBE] Server is running on port: http://localhost:${PORT}`);
+  console.log(`[TradeVerseBE] Server is running on port: http://localhost:${PORT}`);
 });

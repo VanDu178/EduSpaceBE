@@ -7,9 +7,15 @@ import { errorHandler } from './middlewares/errorHandler';
 const app = express();
 
 // Middleware
-// Cấu hình CORS để cho phép Frontend gửi cookies (credentials: true)
+// Cấu hình CORS đọc danh sách các đường dẫn Frontend (Client FE, Admin FE) từ .env
+const allowedOrigins = [
+  process.env.CLIENT_FE_URL || 'http://localhost:3000',
+  process.env.ADMIN_FE_URL || 'http://localhost:5173',
+  process.env.CLIENT_URL
+].filter(Boolean) as string[];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: allowedOrigins,
   credentials: true
 }));
 

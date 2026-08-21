@@ -10,6 +10,8 @@ import { authMiddleware } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
+console.log("Da chay vao router")
+
 // Route Đăng ký (Public)
 router.post('/register', register as express.RequestHandler);
 

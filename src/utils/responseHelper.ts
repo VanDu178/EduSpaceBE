@@ -2,7 +2,7 @@ import type { Response } from 'express';
 
 /**
  * Gửi phản hồi API thành công chuẩn hóa.
- * Hàm này giúp đồng bộ định dạng dữ liệu trả về cho Frontend (EduSpaceFE) khi gọi API thành công.
+ * Hàm này giúp đồng bộ định dạng dữ liệu trả về cho Frontend (TradeVerseFE) khi gọi API thành công.
  * 
  * @param res Đối tượng Response của Express để gửi phản hồi HTTP
  * @param data Dữ liệu thực tế cần gửi về (Payload, hỗ trợ Generic Type <T> để nhận mọi kiểu dữ liệu)

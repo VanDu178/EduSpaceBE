@@ -4,6 +4,7 @@ import prisma from '../config/db';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
+import { sendResetPasswordEmail } from '../utils/emailService';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 
 /**
@@ -93,12 +94,12 @@ export const createUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
     );
   }
 
-  if (password.length < 6) {
+  if (password.length < 8) {
     throw new AppError(
-      'Mật khẩu phải chứa ít nhất 6 ký tự.',
+      'Mật khẩu phải chứa ít nhất 8 ký tự.',
       400,
       'VALIDATION_ERROR',
-      { password: ['Mật khẩu phải chứa ít nhất 6 ký tự.'] }
+      { password: ['Mật khẩu phải chứa ít nhất 8 ký tự.'] }
     );
   }
 
@@ -254,33 +255,17 @@ export const resetPassword = asyncHandler(async (req: AuthenticatedRequest, res:
     data: { password: hashedPassword }
   });
 
-  // Đường dẫn đăng nhập giả lập
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+  // Đường dẫn đăng nhập
+  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
   const loginUrl = `${clientUrl}/login`;
 
-  // Giả lập gửi email (log ra console của backend)
-  console.log(`
-=========================================
-[MOCK EMAIL SENT]
-To: ${user.email}
-Subject: Đặt lại mật khẩu tài khoản EduSpace
-Content:
-  Xin chào ${user.name || 'Người dùng'},
-  
-  Mật khẩu của bạn đã được quản trị viên đặt lại thành công.
-  Dưới đây là thông tin đăng nhập mới của bạn:
-  
-  - Email đăng nhập: ${user.email}
-  - Mật khẩu mới: ${newPassword}
-  
-  Đường dẫn vào trang web để đăng nhập: ${loginUrl}
-  
-  Vì lý do bảo mật, vui lòng đổi mật khẩu sau khi đăng nhập thành công.
-  
-  Trân trọng,
-  Đội ngũ EduSpace.
-=========================================
-  `);
+  // Gửi email thông tin mật khẩu mới cho người dùng
+  await sendResetPasswordEmail({
+    to: user.email,
+    name: user.name,
+    newPassword,
+    loginUrl
+  });
 
   return sendSuccess(
     res,

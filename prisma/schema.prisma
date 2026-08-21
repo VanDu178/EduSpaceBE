@@ -27,6 +27,7 @@ model User {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   refreshTokens RefreshToken[]
+  blogs         Blog[]
 
   @@map("users")
 }
@@ -42,30 +43,36 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-model PostType {
+model BlogType {
   id          Int      @id @default(autoincrement())
   name        String
   code        String   @unique
   description String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  posts       Post[]
+  blogs       Blog[]
 
-  @@map("post_types")
+  @@map("blog_types")
 }
 
-model Post {
-  id         Int      @id @default(autoincrement())
-  title      String
-  content    String?  @db.Text
-  summary    String?  @db.Text
-  thumbnail  String?  @db.LongText
-  published  Boolean  @default(false)
-  postTypeId Int      @map("post_type_id")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+model Blog {
+  id           Int       @id @default(autoincrement())
+  title        String
+  slug         String    @unique
+  blogTypeId   Int       @map("blog_type_id")
+  bannerUrl    String?   @map("banner_url") @db.LongText
+  thumbnailUrl String?   @map("thumbnail_url") @db.LongText
+  isPremium    Boolean   @default(false) @map("is_premium")
+  summary      String?   @db.Text
+  content      String?   @db.Text
+  publishedAt  DateTime? @map("published_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdBy    Int?      @map("created_by")
+  status       String    @default("draft")
 
-  postType PostType @relation(fields: [postTypeId], references: [id])
+  blogType BlogType @relation(fields: [blogTypeId], references: [id])
+  creator  User?    @relation(fields: [createdBy], references: [id])
 
-  @@map("posts")
+  @@map("blogs")
 }
