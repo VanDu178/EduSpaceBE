@@ -3,6 +3,7 @@ import prisma from '../config/db';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
+import { generateBlogCode } from '../utils/codeGenerator';
 
 /**
  * Hàm helper tự động tạo slug từ tiêu đề tiếng Việt
@@ -35,7 +36,8 @@ export const getBlogs = asyncHandler(async (req: Request, res: Response) => {
   if (keyword) {
     where.OR = [
       { title: { contains: keyword } },
-      { summary: { contains: keyword } }
+      { summary: { contains: keyword } },
+      { code: { contains: keyword } }
     ];
   }
 
@@ -176,7 +178,13 @@ export const createBlog = asyncHandler(async (req: Request, res: Response) => {
       publishedAt: publishedAt ? new Date(publishedAt) : (status === 'published' ? new Date() : null),
       createdBy: currentUserId,
       status: status || 'draft'
-    },
+    }
+  });
+
+  const code = generateBlogCode(blog.id);
+  const updatedBlog = await prisma.blog.update({
+    where: { id: blog.id },
+    data: { code },
     include: {
       blogType: true,
       creator: {
@@ -189,7 +197,7 @@ export const createBlog = asyncHandler(async (req: Request, res: Response) => {
     }
   });
 
-  return sendSuccess(res, { blog }, 'Tạo bài blog mới thành công', 201);
+  return sendSuccess(res, { blog: updatedBlog }, 'Tạo bài blog mới thành công', 201);
 });
 
 /**
@@ -434,8 +442,74 @@ export const getBlogByIdOrSlug = asyncHandler(async (req: Request, res: Response
   }
 
   if (!blog) {
+    blog = await prisma.blog.findUnique({
+      where: { code: idOrSlug as string },
+      include: {
+        blogType: true,
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+  }
+
+  if (!blog) {
     throw new AppError('Bài blog không tồn tại', 404, 'NOT_FOUND');
   }
 
   return sendSuccess(res, { blog }, 'Lấy chi tiết bài blog thành công');
 });
+
+/**
+ * Cập nhật quyền truy cập (isPremium) của bài blog (Protected).
+ */
+export const updateBlogAccess = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const blogId = parseInt(id as string, 10);
+  const { isPremium } = req.body;
+
+  if (isNaN(blogId)) {
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  if (typeof isPremium !== 'boolean') {
+    throw new AppError(
+      'Quyền truy cập là bắt buộc và phải là kiểu boolean.',
+      400,
+      'VALIDATION_ERROR',
+      { isPremium: ['Quyền truy cập là bắt buộc.'] }
+    );
+  }
+
+  // Kiểm tra xem bài blog có tồn tại không
+  const existingBlog = await prisma.blog.findUnique({
+    where: { id: blogId }
+  });
+
+  if (!existingBlog) {
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  // Cập nhật quyền truy cập
+  const blog = await prisma.blog.update({
+    where: { id: blogId },
+    data: { isPremium },
+    include: {
+      blogType: true,
+      creator: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
+    }
+  });
+
+  return sendSuccess(res, { blog }, 'Cập nhật quyền truy cập bài viết thành công');
+});
+

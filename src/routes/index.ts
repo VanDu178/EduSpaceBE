@@ -3,6 +3,7 @@ import authRoutes from './authRoutes';
 import blogRoutes from './blogRoutes';
 import blogTypeRoutes from './blogTypeRoutes';
 import userRoutes from './userRoutes';
+import uploadRoutes from './uploadRoutes';
 
 const apiRouter = express.Router();
 
@@ -11,5 +12,7 @@ apiRouter.use('/auth', authRoutes);
 apiRouter.use('/blogs', blogRoutes);
 apiRouter.use('/blog-types', blogTypeRoutes);
 apiRouter.use('/users', userRoutes);
+apiRouter.use('/upload', uploadRoutes);
 
 export default apiRouter;
+

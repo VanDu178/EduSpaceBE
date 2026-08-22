@@ -6,6 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import { sendResetPasswordEmail } from '../utils/emailService';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
+import { generateUserCode } from '../utils/codeGenerator';
 
 /**
  * Lấy danh sách người dùng (Admin only).
@@ -22,7 +23,8 @@ export const getUsers = asyncHandler(async (req: AuthenticatedRequest, res: Resp
   if (keyword) {
     where.OR = [
       { name: { contains: keyword } },
-      { email: { contains: keyword } }
+      { email: { contains: keyword } },
+      { code: { contains: keyword } }
     ];
   }
 
@@ -41,6 +43,7 @@ export const getUsers = asyncHandler(async (req: AuthenticatedRequest, res: Resp
       where,
       select: {
         id: true,
+        code: true,
         email: true,
         name: true,
         role: true,
@@ -139,9 +142,16 @@ export const createUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
       password: hashedPassword,
       name,
       role: role || 'client'
-    },
+    }
+  });
+
+  const code = generateUserCode(user.id);
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: { code },
     select: {
       id: true,
+      code: true,
       email: true,
       name: true,
       role: true,
@@ -151,7 +161,7 @@ export const createUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
     }
   });
 
-  return sendSuccess(res, { user }, 'Tạo tài khoản thành công', 201);
+  return sendSuccess(res, { user: updatedUser }, 'Tạo tài khoản thành công', 201);
 });
 
 /**
@@ -207,6 +217,7 @@ export const updateUser = asyncHandler(async (req: AuthenticatedRequest, res: Re
     },
     select: {
       id: true,
+      code: true,
       email: true,
       name: true,
       role: true,
@@ -313,6 +324,7 @@ export const toggleUserStatus = asyncHandler(async (req: AuthenticatedRequest, r
     data: { status },
     select: {
       id: true,
+      code: true,
       email: true,
       name: true,
       role: true,

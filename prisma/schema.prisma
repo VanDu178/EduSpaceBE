@@ -19,6 +19,7 @@ enum UserStatus {
 
 model User {
   id            Int            @id @default(autoincrement())
+  code          String?        @unique @map("code") @db.VarChar(20)
   email         String         @unique
   password      String?
   name          String?
@@ -60,6 +61,7 @@ model BlogType {
 
 model Blog {
   id           Int       @id @default(autoincrement())
+  code         String?   @unique @map("code") @db.VarChar(30)
   title        String
   slug         String    @unique
   blogTypeId   Int       @map("blog_type_id")

@@ -5,7 +5,8 @@ import {
   createBlog,
   updateBlog,
   deleteBlog,
-  updateBlogStatus
+  updateBlogStatus,
+  updateBlogAccess
 } from '../controllers/blogController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 
@@ -26,7 +27,11 @@ router.put('/:id', authMiddleware as express.RequestHandler, updateBlog as expre
 // Cập nhật trạng thái bài blog (Protected)
 router.patch('/:id/status', authMiddleware as express.RequestHandler, updateBlogStatus as express.RequestHandler);
 
+// Cập nhật quyền truy cập bài blog (Protected)
+router.patch('/:id/access', authMiddleware as express.RequestHandler, updateBlogAccess as express.RequestHandler);
+
 // Xóa bài blog (Protected)
 router.delete('/:id', authMiddleware as express.RequestHandler, deleteBlog as express.RequestHandler);
+
 
 export default router;

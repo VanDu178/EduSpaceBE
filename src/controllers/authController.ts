@@ -13,6 +13,7 @@ import { sendSuccess } from '../utils/responseHelper';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
 import { sendResetPasswordEmail, sendForgotPasswordOtpEmail } from '../utils/emailService';
+import { generateUserCode } from '../utils/codeGenerator';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -77,8 +78,14 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     }
   });
 
+  const code = generateUserCode(user.id);
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: { code }
+  });
+
   // Trả về kết quả (không kèm mật khẩu)
-  const { password: _, ...userWithoutPassword } = user;
+  const { password: _, ...userWithoutPassword } = updatedUser;
 
   return sendSuccess(
     res,
@@ -383,6 +390,12 @@ export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
         role: 'client',
         status: 'active'
       }
+    });
+
+    const code = generateUserCode(user.id);
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { code }
     });
   } else {
     // Nếu user đã tồn tại, liên kết googleId và avatar (nếu chưa có)
