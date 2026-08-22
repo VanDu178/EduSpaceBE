@@ -12,7 +12,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
-import { sendResetPasswordEmail } from '../utils/emailService';
+import { sendResetPasswordEmail, sendForgotPasswordOtpEmail } from '../utils/emailService';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -40,7 +40,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     );
   }
 
-  if (password.length < 8) {
+  if (password?.length < 8) {
     throw new AppError(
       'Mật khẩu phải chứa ít nhất 8 ký tự.',
       400,
@@ -323,7 +323,23 @@ export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
   let picture: string | undefined;
   let googleId: string | undefined;
 
-  if (idToken) {
+  if (googleAccessToken) {
+    try {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${googleAccessToken}` }
+      });
+      if (userInfoRes.ok) {
+        const payload: any = await userInfoRes.json();
+        email = payload?.email;
+        name = payload.name;
+        picture = payload?.picture;
+        googleId = payload?.sub;
+      }
+    } catch (error) {
+      throw new AppError('Google Access Token không hợp lệ hoặc đã hết hạn.', 401, 'INVALID_CREDENTIALS');
+    }
+  }
+  else if (idToken) {
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken,
@@ -331,31 +347,15 @@ export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
       });
       const payload = ticket.getPayload();
       if (payload) {
-        email = payload.email;
-        name = payload.name;
-        picture = payload.picture;
-        googleId = payload.sub;
+        email = payload?.email;
+        name = payload?.name;
+        picture = payload?.picture;
+        googleId = payload?.sub;
       }
     } catch (error) {
       throw new AppError('Google ID Token không hợp lệ hoặc đã hết hạn.', 401, 'INVALID_CREDENTIALS');
     }
-  } else if (googleAccessToken) {
-    try {
-      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${googleAccessToken}` }
-      });
-      if (userInfoRes.ok) {
-        const payload: any = await userInfoRes.json();
-        email = payload.email;
-        name = payload.name;
-        picture = payload.picture;
-        googleId = payload.sub;
-      }
-    } catch (error) {
-      throw new AppError('Google Access Token không hợp lệ hoặc đã hết hạn.', 401, 'INVALID_CREDENTIALS');
-    }
   }
-
   if (!email || !googleId) {
     throw new AppError('Không thể xác thực thông tin tài khoản Google.', 400, 'INVALID_CREDENTIALS');
   }
@@ -464,14 +464,10 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 
   console.log(`[FORGOT PASSWORD OTP] Mã OTP đặt lại mật khẩu cho ${email} là: ${otp}`);
 
-  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
-  const loginUrl = `${clientUrl}/login`;
-
-  await sendResetPasswordEmail({
+  await sendForgotPasswordOtpEmail({
     to: user.email,
     name: user.name,
-    newPassword: `Mã OTP xác thực: ${otp}`,
-    loginUrl
+    otp
   });
 
   return sendSuccess(
