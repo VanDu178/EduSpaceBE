@@ -4,6 +4,8 @@ import blogRoutes from './blogRoutes';
 import blogTypeRoutes from './blogTypeRoutes';
 import userRoutes from './userRoutes';
 import uploadRoutes from './uploadRoutes';
+import membershipPlanRoutes from './membershipPlanRoutes';
+import userSubscriptionRoutes from './userSubscriptionRoutes';
 
 const apiRouter = express.Router();
 
@@ -13,6 +15,9 @@ apiRouter.use('/blogs', blogRoutes);
 apiRouter.use('/blog-types', blogTypeRoutes);
 apiRouter.use('/users', userRoutes);
 apiRouter.use('/upload', uploadRoutes);
+apiRouter.use('/membership-plans', membershipPlanRoutes);
+apiRouter.use('/subscriptions', userSubscriptionRoutes);
 
 export default apiRouter;
+
 

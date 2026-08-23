@@ -32,6 +32,7 @@ model User {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   refreshTokens RefreshToken[]
   blogs         Blog[]
+  subscriptions UserSubscription[]
 
   @@map("users")
 }
@@ -81,3 +82,61 @@ model Blog {
 
   @@map("blogs")
 }
+
+enum SubscriptionStatus {
+  active
+  expired
+  cancelled
+  pending_payment @map("pending_payment")
+}
+
+enum BillingCycle {
+  monthly
+  yearly
+}
+
+model MembershipPlan {
+  id            Int                @id @default(autoincrement())
+  code          String             @unique @db.VarChar(50)
+  name          String             @db.VarChar(100)
+  tagLine       String?            @map("tag_line") @db.VarChar(255)
+  monthlyPrice  Decimal            @default(0) @map("monthly_price") @db.Decimal(12, 2)
+  yearlyPrice   Decimal            @default(0) @map("yearly_price") @db.Decimal(12, 2)
+  popularBadge  String?            @map("popular_badge") @db.VarChar(100)
+  buttonText    String?            @map("button_text") @db.VarChar(100)
+  features            Json?
+  unavailableFeatures Json?              @map("unavailable_features")
+  sortOrder     Int                @default(0) @map("sort_order")
+  isActive      Boolean            @default(true) @map("is_active")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  subscriptions UserSubscription[]
+
+  @@map("membership_plans")
+}
+
+model UserSubscription {
+  id            Int                @id @default(autoincrement())
+  code          String             @unique @db.VarChar(50)
+  userId        Int                @map("user_id")
+  planId        Int                @map("plan_id")
+  billingCycle  BillingCycle       @default(monthly) @map("billing_cycle")
+  startDate     DateTime           @map("start_date")
+  endDate       DateTime           @map("end_date")
+  status        SubscriptionStatus @default(active)
+  pricePaid     Decimal            @map("price_paid") @db.Decimal(12, 2)
+  paymentMethod String?            @map("payment_method") @db.VarChar(50)
+  paymentRef    String?            @map("payment_ref") @db.VarChar(100)
+  autoRenew     Boolean            @default(false) @map("auto_renew")
+  cancelledAt   DateTime?          @map("cancelled_at")
+  cancelReason  String?            @map("cancel_reason") @db.VarChar(255)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          MembershipPlan     @relation(fields: [planId], references: [id])
+
+  @@map("user_subscriptions")
+}
+
