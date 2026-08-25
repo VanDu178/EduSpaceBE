@@ -96,24 +96,51 @@ enum BillingCycle {
 }
 
 model MembershipPlan {
-  id            Int                @id @default(autoincrement())
-  code          String             @unique @db.VarChar(50)
-  name          String             @db.VarChar(100)
-  tagLine       String?            @map("tag_line") @db.VarChar(255)
-  monthlyPrice  Decimal            @default(0) @map("monthly_price") @db.Decimal(12, 2)
-  yearlyPrice   Decimal            @default(0) @map("yearly_price") @db.Decimal(12, 2)
-  popularBadge  String?            @map("popular_badge") @db.VarChar(100)
-  buttonText    String?            @map("button_text") @db.VarChar(100)
-  features            Json?
-  unavailableFeatures Json?              @map("unavailable_features")
-  sortOrder     Int                @default(0) @map("sort_order")
-  isActive      Boolean            @default(true) @map("is_active")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-
+  id            Int                     @id @default(autoincrement())
+  code          String                  @unique @db.VarChar(50)
+  name          String                  @db.VarChar(100)
+  tagLine       String?                 @map("tag_line") @db.VarChar(255)
+  monthlyPrice          Decimal                 @default(0) @map("monthly_price") @db.Decimal(12, 2)
+  yearlyPrice           Decimal                 @default(0) @map("yearly_price") @db.Decimal(12, 2)
+  yearlyDiscountPercent Decimal                 @default(0) @map("yearly_discount_percent") @db.Decimal(5, 2)
+  popularBadge  String?                 @map("popular_badge") @db.VarChar(100)
+  buttonText    String?                 @map("button_text") @db.VarChar(100)
+  tierLevel     Int                     @default(1) @map("tier_level")
+  isActive      Boolean                 @default(true) @map("is_active")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
   subscriptions UserSubscription[]
+  planFeatures  MembershipPlanFeature[]
 
   @@map("membership_plans")
+}
+
+model Feature {
+  id          Int                     @id @default(autoincrement())
+  code        String                  @unique @db.VarChar(50)
+  name        String                  @db.VarChar(100)
+  description String?                 @db.Text
+  sortOrder   Int                     @default(0) @map("sort_order")
+  isActive    Boolean                 @default(true) @map("is_active")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+  plans       MembershipPlanFeature[]
+
+  @@map("features")
+}
+
+model MembershipPlanFeature {
+  planId      Int            @map("plan_id")
+  featureId   Int            @map("feature_id")
+  isAvailable Boolean        @default(true) @map("is_available")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  plan        MembershipPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature     Feature        @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@id([planId, featureId])
+  @@map("membership_plan_features")
 }
 
 model UserSubscription {
@@ -139,4 +166,5 @@ model UserSubscription {
 
   @@map("user_subscriptions")
 }
+
 

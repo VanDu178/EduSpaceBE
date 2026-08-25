@@ -6,7 +6,7 @@ import { sendSuccess } from '../utils/responseHelper';
 import { generatePlanCode } from '../utils/codeGenerator';
 
 /**
- * Lấy danh sách gói hội viên.
+ * Lấy danh sách gói hội viên kèm danh sách các tính năng.
  * - Client xem (Public): CHỈ lấy các gói isActive = true
  * - Admin xem: Lấy tất cả hoặc lọc theo query parameter isActive
  */
@@ -22,8 +22,15 @@ export const getMembershipPlans = asyncHandler(async (req: Request, res: Respons
 
   const plans = await prisma.membershipPlan.findMany({
     where: whereClause,
+    include: {
+      planFeatures: {
+        include: {
+          feature: true
+        }
+      }
+    },
     orderBy: [
-      { sortOrder: 'asc' },
+      { tierLevel: 'asc' },
       { createdAt: 'asc' }
     ]
   });
@@ -41,11 +48,25 @@ export const getMembershipPlanById = asyncHandler(async (req: Request, res: Resp
   let plan;
   if (!isNaN(planId)) {
     plan = await prisma.membershipPlan.findUnique({
-      where: { id: planId }
+      where: { id: planId },
+      include: {
+        planFeatures: {
+          include: {
+            feature: true
+          }
+        }
+      }
     });
   } else {
     plan = await prisma.membershipPlan.findUnique({
-      where: { code: (id as string).toUpperCase() }
+      where: { code: (id as string).toUpperCase() },
+      include: {
+        planFeatures: {
+          include: {
+            feature: true
+          }
+        }
+      }
     });
   }
 
@@ -59,6 +80,7 @@ export const getMembershipPlanById = asyncHandler(async (req: Request, res: Resp
 /**
  * Tạo mới gói hội viên (Chỉ Admin).
  * - Mã code được tự động sinh theo format PLN-XXXXXX
+ * - planFeatures: [{ featureId: number, isAvailable: boolean }]
  */
 export const createMembershipPlan = asyncHandler(async (req: Request, res: Response) => {
   const {
@@ -66,11 +88,11 @@ export const createMembershipPlan = asyncHandler(async (req: Request, res: Respo
     tagLine,
     monthlyPrice,
     yearlyPrice,
+    yearlyDiscountPercent,
     popularBadge,
     buttonText,
-    features,
-    unavailableFeatures,
-    sortOrder,
+    planFeatures,
+    tierLevel,
     isActive
   } = req.body;
 
@@ -83,31 +105,55 @@ export const createMembershipPlan = asyncHandler(async (req: Request, res: Respo
     );
   }
 
+  const mPrice = monthlyPrice !== undefined ? Number(monthlyPrice) : 0;
+  const discount = yearlyDiscountPercent !== undefined ? Number(yearlyDiscountPercent) : 0;
+  let yPrice = yearlyPrice !== undefined ? Number(yearlyPrice) : 0;
+  if (yearlyDiscountPercent !== undefined || (mPrice > 0 && discount > 0)) {
+    yPrice = Math.round(mPrice * 12 * (1 - discount / 100));
+  }
+
   // Bước 1: Tạo gói với mã tạm thời
   const tempPlan = await prisma.membershipPlan.create({
     data: {
       code: `PLN-TEMP-${Date.now()}`,
       name: name.trim(),
       tagLine: tagLine ? tagLine.trim() : null,
-      monthlyPrice: monthlyPrice !== undefined ? Number(monthlyPrice) : 0,
-      yearlyPrice: yearlyPrice !== undefined ? Number(yearlyPrice) : 0,
+      monthlyPrice: mPrice,
+      yearlyPrice: yPrice,
+      yearlyDiscountPercent: discount,
       popularBadge: popularBadge ? popularBadge.trim() : null,
       buttonText: buttonText ? buttonText.trim() : null,
-      features: features !== undefined ? features : null,
-      unavailableFeatures: unavailableFeatures !== undefined ? unavailableFeatures : null,
-      sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0,
+      tierLevel: tierLevel !== undefined ? Number(tierLevel) : 1,
       isActive: isActive !== undefined ? Boolean(isActive) : true
     }
   });
 
-  // Bước 2: Sinh mã định danh chuẩn PLN-XXXXXX và cập nhật
+  // Bước 2: Thêm liên kết tính năng (planFeatures) nếu có
+  if (Array.isArray(planFeatures) && planFeatures.length > 0) {
+    await prisma.membershipPlanFeature.createMany({
+      data: planFeatures.map((pf: { featureId: number; isAvailable: boolean }) => ({
+        planId: tempPlan.id,
+        featureId: Number(pf.featureId),
+        isAvailable: Boolean(pf.isAvailable)
+      }))
+    });
+  }
+
+  // Bước 3: Sinh mã định danh chuẩn PLN-XXXXXX và cập nhật
   const code = generatePlanCode(tempPlan.id);
   const plan = await prisma.membershipPlan.update({
     where: { id: tempPlan.id },
-    data: { code }
+    data: { code },
+    include: {
+      planFeatures: {
+        include: {
+          feature: true
+        }
+      }
+    }
   });
 
-  return sendSuccess(res, plan, 'Tạo gói hội viên mới thành công', 201);
+  return sendSuccess(res, plan, 'Tạo gói hội viên thành công', 201);
 });
 
 /**
@@ -134,11 +180,11 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
     tagLine,
     monthlyPrice,
     yearlyPrice,
+    yearlyDiscountPercent,
     popularBadge,
     buttonText,
-    features,
-    unavailableFeatures,
-    sortOrder,
+    planFeatures,
+    tierLevel,
     isActive
   } = req.body;
 
@@ -152,48 +198,58 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
   }
   if (tagLine !== undefined) updateData.tagLine = tagLine ? tagLine.trim() : null;
   if (monthlyPrice !== undefined) updateData.monthlyPrice = Number(monthlyPrice);
-  if (yearlyPrice !== undefined) updateData.yearlyPrice = Number(yearlyPrice);
+  if (yearlyDiscountPercent !== undefined) updateData.yearlyDiscountPercent = Number(yearlyDiscountPercent);
+  
+  // Tính toán lại yearlyPrice khi có monthlyPrice hoặc yearlyDiscountPercent
+  const targetMonthlyPrice = monthlyPrice !== undefined ? Number(monthlyPrice) : Number(existing.monthlyPrice);
+  const targetDiscountPercent = yearlyDiscountPercent !== undefined ? Number(yearlyDiscountPercent) : Number(existing.yearlyDiscountPercent);
+
+  if (monthlyPrice !== undefined || yearlyDiscountPercent !== undefined) {
+    updateData.yearlyPrice = Math.round(targetMonthlyPrice * 12 * (1 - targetDiscountPercent / 100));
+  } else if (yearlyPrice !== undefined) {
+    updateData.yearlyPrice = Number(yearlyPrice);
+  }
+
   if (popularBadge !== undefined) updateData.popularBadge = popularBadge ? popularBadge.trim() : null;
   if (buttonText !== undefined) updateData.buttonText = buttonText ? buttonText.trim() : null;
-  if (features !== undefined) updateData.features = features;
-  if (unavailableFeatures !== undefined) updateData.unavailableFeatures = unavailableFeatures;
-  if (sortOrder !== undefined) updateData.sortOrder = Number(sortOrder);
+  if (tierLevel !== undefined) updateData.tierLevel = Number(tierLevel);
   if (isActive !== undefined) updateData.isActive = Boolean(isActive);
 
-  const updatedPlan = await prisma.membershipPlan.update({
+  // Cập nhật thông tin gói
+  await prisma.membershipPlan.update({
     where: { id: planId },
     data: updateData
   });
 
-  return sendSuccess(res, updatedPlan, 'Cập nhật gói hội viên thành công');
-});
+  // Cập nhật liên kết planFeatures nếu được truyền lên
+  if (Array.isArray(planFeatures)) {
+    await prisma.membershipPlanFeature.deleteMany({
+      where: { planId }
+    });
 
-/**
- * Cập nhật thứ tự hiển thị gói hội viên (sortOrder) (Chỉ Admin).
- */
-export const updateMembershipPlanSortOrder = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const planId = parseInt(id as string, 10);
-  const { sortOrder } = req.body;
-
-  if (isNaN(planId) || sortOrder === undefined) {
-    throw new AppError('Dữ liệu thứ tự không hợp lệ', 400, 'VALIDATION_ERROR');
+    if (planFeatures.length > 0) {
+      await prisma.membershipPlanFeature.createMany({
+        data: planFeatures.map((pf: { featureId: number; isAvailable: boolean }) => ({
+          planId,
+          featureId: Number(pf.featureId),
+          isAvailable: Boolean(pf.isAvailable)
+        }))
+      });
+    }
   }
 
-  const existing = await prisma.membershipPlan.findUnique({
-    where: { id: planId }
-  });
-
-  if (!existing) {
-    throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  const updated = await prisma.membershipPlan.update({
+  const updatedPlan = await prisma.membershipPlan.findUnique({
     where: { id: planId },
-    data: { sortOrder: Number(sortOrder) }
+    include: {
+      planFeatures: {
+        include: {
+          feature: true
+        }
+      }
+    }
   });
 
-  return sendSuccess(res, updated, 'Cập nhật thứ tự gói thành công');
+  return sendSuccess(res, updatedPlan, 'Cập nhật gói hội viên thành công');
 });
 
 /**
@@ -217,7 +273,14 @@ export const toggleMembershipPlanStatus = asyncHandler(async (req: Request, res:
 
   const updated = await prisma.membershipPlan.update({
     where: { id: planId },
-    data: { isActive: !existing.isActive }
+    data: { isActive: !existing.isActive },
+    include: {
+      planFeatures: {
+        include: {
+          feature: true
+        }
+      }
+    }
   });
 
   const message = updated.isActive

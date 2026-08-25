@@ -4,6 +4,8 @@ import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
 import { generateBlogCode } from '../utils/codeGenerator';
+import { verifyAccessToken } from '../utils/authHelper';
+import { checkUserFeatureAccess } from '../utils/featureAccessHelper';
 
 /**
  * Hàm helper tự động tạo slug từ tiêu đề tiếng Việt
@@ -461,8 +463,42 @@ export const getBlogByIdOrSlug = asyncHandler(async (req: Request, res: Response
     throw new AppError('Bài blog không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // Kiểm tra quyền truy cập nếu là bài viết Premium
+  if (blog.isPremium) {
+    const authHeader = req.headers.authorization;
+    let userId: number | null = null;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const decoded = verifyAccessToken(token);
+      if (decoded && decoded.userId) {
+        userId = decoded.userId;
+      }
+    }
+
+    if (!userId) {
+      throw new AppError(
+        'Bài viết này dành cho hội viên Premium. Vui lòng đăng nhập và đăng ký gói hội viên để xem toàn bộ nội dung.',
+        403,
+        'PREMIUM_REQUIRED'
+      );
+    }
+
+    // Kiểm tra tính năng READ_PREMIUM_BLOGS trong gói hội viên của người dùng
+    const { hasAccess, reason } = await checkUserFeatureAccess(userId, 'READ_PREMIUM_BLOGS');
+
+    if (!hasAccess) {
+      const message =
+        reason === 'NO_ACTIVE_SUBSCRIPTION'
+          ? 'Bài viết này dành cho hội viên Premium. Vui lòng đăng ký gói hội viên để truy cập.'
+          : 'Gói hội viên hiện tại của bạn không bao gồm tính năng Đọc bài viết Premium. Vui lòng nâng cấp gói hội viên.';
+      throw new AppError(message, 403, 'PREMIUM_REQUIRED');
+    }
+  }
+
   return sendSuccess(res, { blog }, 'Lấy chi tiết bài blog thành công');
 });
+
 
 /**
  * Cập nhật quyền truy cập (isPremium) của bài blog (Protected).
