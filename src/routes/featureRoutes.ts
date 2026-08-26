@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getFeatures,
+  getSystemFeatureCodes,
   getFeatureById,
   createFeature,
   updateFeature,
@@ -14,6 +15,9 @@ const router = express.Router();
 
 // Lấy danh sách các tính năng (Public/Protected)
 router.get('/', getFeatures as express.RequestHandler);
+
+// Lấy danh sách mã tính năng hệ thống chuẩn
+router.get('/system-codes', getSystemFeatureCodes as express.RequestHandler);
 
 // Lấy chi tiết tính năng (Public/Protected)
 router.get('/:id', getFeatureById as express.RequestHandler);

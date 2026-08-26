@@ -3,7 +3,7 @@ import prisma from '../config/db';
 /**
  * Kiểm tra xem người dùng có quyền sử dụng một tính năng cụ thể dựa trên gói hội viên đang hoạt động của họ hay không.
  * @param userId ID của người dùng
- * @param featureCode Mã tính năng (ví dụ: 'READ_PREMIUM_BLOGS')
+ * @param featureCode Mã tính năng (ví dụ: 'blog:read_premium')
  */
 export const checkUserFeatureAccess = async (
   userId: number,

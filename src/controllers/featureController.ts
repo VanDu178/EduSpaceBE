@@ -3,6 +3,7 @@ import prisma from '../config/db';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
+import { SYSTEM_FEATURE_CODES, SYSTEM_FEATURE_METADATA } from '../constants/featureCodes';
 
 /**
  * Lấy danh sách tất cả các tính năng (Feature).
@@ -34,6 +35,31 @@ export const getFeatures = asyncHandler(async (req: Request, res: Response) => {
   });
 
   return sendSuccess(res, { features }, 'Lấy danh sách tính năng thành công');
+});
+
+/**
+ * Lấy danh sách các Mã tính năng hệ thống chuẩn (System Feature Codes) kèm metadata.
+ */
+export const getSystemFeatureCodes = asyncHandler(async (_req: Request, res: Response) => {
+  const existingFeatures = await prisma.feature.findMany({
+    select: { code: true }
+  });
+
+  const existingCodesSet = new Set(existingFeatures.map((f) => f.code));
+
+  const systemCodes = SYSTEM_FEATURE_CODES.map((code) => {
+    const metadata = SYSTEM_FEATURE_METADATA[code] || {
+      code,
+      name: code,
+      description: ''
+    };
+    return {
+      ...metadata,
+      isCreated: existingCodesSet.has(code)
+    };
+  });
+
+  return sendSuccess(res, { systemCodes }, 'Lấy danh sách mã tính năng hệ thống thành công');
 });
 
 /**
@@ -71,7 +97,7 @@ export const createFeature = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  const formattedCode = code.trim().toUpperCase();
+  const formattedCode = code.trim();
 
   // Kiểm tra trùng mã code
   const existingFeature = await prisma.feature.findUnique({
@@ -120,18 +146,15 @@ export const updateFeature = asyncHandler(async (req: Request, res: Response) =>
   const updateData: any = {};
 
   if (code !== undefined) {
-    const formattedCode = code.trim().toUpperCase();
+    const formattedCode = code.trim();
     if (formattedCode !== existingFeature.code) {
-      const codeExist = await prisma.feature.findUnique({
-        where: { code: formattedCode }
-      });
-      if (codeExist) {
-        throw new AppError('Mã tính năng đã được sử dụng', 400, 'VALIDATION_ERROR', {
-          code: ['Mã tính năng đã tồn tại.']
-        });
-      }
+      throw new AppError(
+        'Không được phép thay đổi Mã hệ thống (code) của tính năng đã tạo.',
+        400,
+        'VALIDATION_ERROR',
+        { code: ['Mã tính năng không được phép sửa đổi sau khi đã tạo.'] }
+      );
     }
-    updateData.code = formattedCode;
   }
 
   if (name !== undefined) updateData.name = name;

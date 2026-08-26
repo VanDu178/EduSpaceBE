@@ -1,7 +1,8 @@
 import express from 'express';
 import {
   getBlogs,
-  getBlogByIdOrSlug,
+  getBlogById,
+  getBlogBySlug,
   createBlog,
   updateBlog,
   deleteBlog,
@@ -9,14 +10,18 @@ import {
   updateBlogAccess
 } from '../controllers/blogController';
 import { authMiddleware } from '../middlewares/authMiddleware';
+import { adminMiddleware } from '../middlewares/adminMiddleware';
 
 const router = express.Router();
 
 // Lấy danh sách các bài blog (Public)
 router.get('/', getBlogs as express.RequestHandler);
 
-// Lấy chi tiết bài blog theo ID hoặc Slug (Public)
-router.get('/:idOrSlug', getBlogByIdOrSlug as express.RequestHandler);
+// Lấy chi tiết bài blog theo ID
+router.get('/id/:id', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, getBlogById as express.RequestHandler);
+
+// Lấy chi tiết bài blog theo Slug (Dành cho Client)
+router.get('/slug/:slug', getBlogBySlug as express.RequestHandler);
 
 // Tạo mới bài blog (Protected)
 router.post('/', authMiddleware as express.RequestHandler, createBlog as express.RequestHandler);

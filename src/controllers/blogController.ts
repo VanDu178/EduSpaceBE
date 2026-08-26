@@ -146,7 +146,9 @@ export const createBlog = asyncHandler(async (req: Request, res: Response) => {
   });
 
   if (existingSlug) {
-    slug = `${slug}-${Date.now()}`;
+    throw new AppError('Slug đã tồn tại', 400, 'VALIDATION_ERROR', {
+      slug: ['Slug đã được sử dụng bởi một bài blog khác.']
+    });
   }
 
   // Kiểm tra xem blogType có tồn tại hay không
@@ -403,100 +405,131 @@ export const updateBlogStatus = asyncHandler(async (req: Request, res: Response)
 });
 
 /**
- * Lấy chi tiết một bài blog theo ID hoặc Slug.
+ * Lấy chi tiết một bài blog theo ID.
  */
-export const getBlogByIdOrSlug = asyncHandler(async (req: Request, res: Response) => {
-  const { idOrSlug } = req.params;
-  const numericId = parseInt(idOrSlug as string, 10);
+export const getBlogById = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const blogId = parseInt(id as string, 10);
 
-  let blog = null;
-
-  if (!isNaN(numericId)) {
-    blog = await prisma.blog.findUnique({
-      where: { id: numericId },
-      include: {
-        blogType: true,
-        creator: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
-      }
-    });
+  if (isNaN(blogId) || blogId <= 0) {
+    throw new AppError('ID bài blog không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  if (!blog) {
-    blog = await prisma.blog.findUnique({
-      where: { slug: idOrSlug as string },
-      include: {
-        blogType: true,
-        creator: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
+  const blog = await prisma.blog.findUnique({
+    where: { id: blogId },
+    include: {
+      blogType: true,
+      creator: {
+        select: {
+          id: true,
+          name: true,
+          email: true
         }
       }
-    });
-  }
-
-  if (!blog) {
-    blog = await prisma.blog.findUnique({
-      where: { code: idOrSlug as string },
-      include: {
-        blogType: true,
-        creator: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
-      }
-    });
-  }
+    }
+  });
 
   if (!blog) {
     throw new AppError('Bài blog không tồn tại', 404, 'NOT_FOUND');
   }
 
-  // Kiểm tra quyền truy cập nếu là bài viết Premium
+  return sendSuccess(res, { blog }, 'Lấy chi tiết bài blog theo ID thành công');
+});
+
+/**
+ * Lấy chi tiết một bài blog theo Slug (Dành cho Client).
+ */
+export const getBlogBySlug = asyncHandler(async (req: Request, res: Response) => {
+  const { slug } = req.params;
+  const slugStr = slug as string;
+
+  if (!slugStr) {
+    throw new AppError('Slug bài blog không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  let blog = await prisma.blog.findUnique({
+    where: { slug: slugStr },
+    include: {
+      blogType: true,
+      creator: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
+    }
+  });
+
+  if (!blog) {
+    throw new AppError('Bài blog không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  let hasFullAccess = true;
+
+  // Nếu là bài viết Premium, xác thực token và phân quyền truy cập
   if (blog.isPremium) {
+    hasFullAccess = false;
     const authHeader = req.headers.authorization;
     let userId: number | null = null;
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const decoded = verifyAccessToken(token);
-      if (decoded && decoded.userId) {
-        userId = decoded.userId;
+      try {
+        const decoded = verifyAccessToken(token);
+        if (decoded && decoded.userId) {
+          userId = decoded.userId;
+        }
+      } catch (e) {
+        userId = null;
       }
     }
 
-    if (!userId) {
-      throw new AppError(
-        'Bài viết này dành cho hội viên Premium. Vui lòng đăng nhập và đăng ký gói hội viên để xem toàn bộ nội dung.',
-        403,
-        'PREMIUM_REQUIRED'
-      );
-    }
+    if (userId) {
+      // 1. Kiểm tra nếu là ADMIN
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true }
+      });
 
-    // Kiểm tra tính năng READ_PREMIUM_BLOGS trong gói hội viên của người dùng
-    const { hasAccess, reason } = await checkUserFeatureAccess(userId, 'READ_PREMIUM_BLOGS');
-
-    if (!hasAccess) {
-      const message =
-        reason === 'NO_ACTIVE_SUBSCRIPTION'
-          ? 'Bài viết này dành cho hội viên Premium. Vui lòng đăng ký gói hội viên để truy cập.'
-          : 'Gói hội viên hiện tại của bạn không bao gồm tính năng Đọc bài viết Premium. Vui lòng nâng cấp gói hội viên.';
-      throw new AppError(message, 403, 'PREMIUM_REQUIRED');
+      if (user?.role === 'admin') {
+        hasFullAccess = true;
+      } else {
+        // 2. Kiểm tra tính năng blog:read_premium trong gói hội viên của người dùng
+        const { hasAccess } = await checkUserFeatureAccess(userId, 'blog:read_premium');
+        if (hasAccess) {
+          hasFullAccess = true;
+        }
+      }
     }
   }
 
-  return sendSuccess(res, { blog }, 'Lấy chi tiết bài blog thành công');
+  // Chuẩn bị dữ liệu bài viết trả về
+  let finalContent = blog.content;
+
+  if (!hasFullAccess) {
+    // Tạo Teaser Content
+    if (blog.content && blog.content.includes('<!--more-->')) {
+      finalContent = blog.content.split('<!--more-->')[0];
+    } else if (blog.content) {
+      const pMatch = blog.content.match(/(<p[\s\S]*?<\/p>[\s\S]*?){1,2}/i);
+      if (pMatch && pMatch[0]) {
+        finalContent = pMatch[0];
+      } else if (blog.content.length > 350) {
+        finalContent = blog.content.slice(0, 350) + '...';
+      }
+    } else if (blog.summary) {
+      finalContent = `<p>${blog.summary}</p>`;
+    }
+  }
+
+  const blogResponse = {
+    ...blog,
+    content: finalContent,
+    hasFullAccess
+  };
+
+  return sendSuccess(res, { blog: blogResponse }, 'Lấy chi tiết bài blog theo Slug thành công');
 });
 
 
