@@ -3,9 +3,59 @@ import { SYSTEM_FEATURE_CODES, SYSTEM_FEATURE_METADATA } from '../src/constants/
 
 const prisma = new PrismaClient();
 
+async function seedVietqrBanks() {
+  console.log('🔄 Fetching bank list from VietQR official API...');
+  try {
+    const response = await fetch('https://api.vietqr.io/v2/banks');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const json = await response.json();
+    if (json.code === '00' && Array.isArray(json.data)) {
+      // Chỉ lọc các ngân hàng có transferSupported === 1
+      const supportedBanks = json.data.filter((bank: any) => Number(bank.transferSupported) === 1);
+      console.log(`ℹ️ Found ${supportedBanks.length} banks supporting VietQR transfers out of ${json.data.length} total banks.`);
+
+      let seededCount = 0;
+      for (const bank of supportedBanks) {
+        await prisma.vietqrBank.upsert({
+          where: { code: bank.code },
+          update: {
+            name: bank.name,
+            shortName: bank.shortName || bank.short_name || bank.code,
+            bin: bank.bin,
+            logo: bank.logo,
+            transferSupported: Number(bank.transferSupported) || 1,
+            lookupSupported: Number(bank.lookupSupported) || 0,
+          },
+          create: {
+            id: bank.id,
+            code: bank.code,
+            name: bank.name,
+            shortName: bank.shortName || bank.short_name || bank.code,
+            bin: bank.bin,
+            logo: bank.logo,
+            transferSupported: Number(bank.transferSupported) || 1,
+            lookupSupported: Number(bank.lookupSupported) || 0,
+            isActive: true,
+          },
+        });
+        seededCount++;
+      }
+      console.log(`✅ Seeded/Updated ${seededCount} VietQR banks successfully!`);
+    } else {
+      console.warn('⚠️ VietQR API responded with non-success code:', json.desc);
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch banks from VietQR API during seed:', error);
+  }
+}
+
 async function main() {
   console.log('🌱 Starting database seeding...');
 
+  // 1. Seed System Features
   for (const code of SYSTEM_FEATURE_CODES) {
     const metadata = SYSTEM_FEATURE_METADATA[code];
     if (!metadata) continue;
@@ -28,6 +78,9 @@ async function main() {
     console.log(`✅ Seeded system feature: '${feature.code}' (${feature.name})`);
   }
 
+  // 2. Seed VietQR Banks
+  await seedVietqrBanks();
+
   console.log('🎉 Database seeding completed successfully!');
 }
 
@@ -39,3 +92,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

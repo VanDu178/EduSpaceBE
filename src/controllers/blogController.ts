@@ -526,7 +526,8 @@ export const getBlogBySlug = asyncHandler(async (req: Request, res: Response) =>
   const blogResponse = {
     ...blog,
     content: finalContent,
-    hasFullAccess
+    hasFullAccess,
+    requiredFeatureCode: blog.isPremium ? 'blog:read_premium' : undefined,
   };
 
   return sendSuccess(res, { blog: blogResponse }, 'Lấy chi tiết bài blog theo Slug thành công');
