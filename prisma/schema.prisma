@@ -18,21 +18,23 @@ enum UserStatus {
 }
 
 model User {
-  id            Int            @id @default(autoincrement())
-  code          String?        @unique @map("code") @db.VarChar(20)
-  email         String         @unique
-  password      String?
-  name          String?
-  role          Role           @default(client)
-  status        UserStatus     @default(active)
-  googleId      String?        @unique @map("google_id")
-  avatarUrl     String?        @map("avatar_url")
-  provider      String         @default("credentials")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  refreshTokens RefreshToken[]
-  blogs         Blog[]
-  subscriptions UserSubscription[]
+  id                  Int                  @id @default(autoincrement())
+  code                String?              @unique @map("code") @db.VarChar(20)
+  email               String               @unique
+  password            String?
+  name                String?
+  role                Role                 @default(client)
+  status              UserStatus           @default(active)
+  googleId            String?              @unique @map("google_id")
+  avatarUrl           String?              @map("avatar_url")
+  provider            String               @default("credentials")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  refreshTokens       RefreshToken[]
+  blogs               Blog[]
+  subscriptions       UserSubscription[]
+  paymentTransactions PaymentTransaction[]
+  approvedTransactions PaymentTransaction[] @relation("AdminApprovedTransactions")
 
   @@map("users")
 }
@@ -96,21 +98,22 @@ enum BillingCycle {
 }
 
 model MembershipPlan {
-  id            Int                     @id @default(autoincrement())
-  code          String                  @unique @db.VarChar(50)
-  name          String                  @db.VarChar(100)
-  tagLine       String?                 @map("tag_line") @db.VarChar(255)
+  id                    Int                     @id @default(autoincrement())
+  code                  String                  @unique @db.VarChar(50)
+  name                  String                  @db.VarChar(100)
+  tagLine               String?                 @map("tag_line") @db.VarChar(255)
   monthlyPrice          Decimal                 @default(0) @map("monthly_price") @db.Decimal(12, 2)
   yearlyPrice           Decimal                 @default(0) @map("yearly_price") @db.Decimal(12, 2)
   yearlyDiscountPercent Decimal                 @default(0) @map("yearly_discount_percent") @db.Decimal(5, 2)
-  popularBadge  String?                 @map("popular_badge") @db.VarChar(100)
-  buttonText    String?                 @map("button_text") @db.VarChar(100)
-  tierLevel     Int                     @default(1) @map("tier_level")
-  isActive      Boolean                 @default(true) @map("is_active")
-  createdAt     DateTime                @default(now()) @map("created_at")
-  updatedAt     DateTime                @updatedAt @map("updated_at")
-  subscriptions UserSubscription[]
-  planFeatures  MembershipPlanFeature[]
+  popularBadge          String?                 @map("popular_badge") @db.VarChar(100)
+  buttonText            String?                 @map("button_text") @db.VarChar(100)
+  tierLevel             Int                     @default(1) @map("tier_level")
+  isActive              Boolean                 @default(true) @map("is_active")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+  subscriptions         UserSubscription[]
+  planFeatures          MembershipPlanFeature[]
+  paymentTransactions   PaymentTransaction[]
 
   @@map("membership_plans")
 }
@@ -167,19 +170,19 @@ model UserSubscription {
   @@map("user_subscriptions")
 }
 
-
 model PaymentAccount {
-  id            Int         @id @default(autoincrement())
-  bankCode      String      @map("bank_code") @db.VarChar(50)
-  bank          VietqrBank? @relation(fields: [bankCode], references: [code])
-  accountNo     String      @map("account_no") @db.VarChar(50)
-  accountHolder String      @map("account_holder") @db.VarChar(100)
-  qrCodeUrl     String?     @map("qr_code_url") @db.VarChar(500)
-  isDefault     Boolean     @default(false) @map("is_default")
-  isActive      Boolean     @default(true) @map("is_active")
-  note          String?     @db.Text
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  id                  Int                  @id @default(autoincrement())
+  bankCode            String               @map("bank_code") @db.VarChar(50)
+  bank                VietqrBank?          @relation(fields: [bankCode], references: [code])
+  accountNo           String               @map("account_no") @db.VarChar(50)
+  accountHolder       String               @map("account_holder") @db.VarChar(100)
+  qrCodeUrl           String?              @map("qr_code_url") @db.VarChar(500)
+  isDefault           Boolean              @default(false) @map("is_default")
+  isActive            Boolean              @default(true) @map("is_active")
+  note                String?              @db.Text
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  paymentTransactions PaymentTransaction[]
 
   @@map("payment_accounts")
 }
@@ -200,6 +203,65 @@ model VietqrBank {
 
   @@map("vietqr_banks")
 }
+
+enum ApprovalType {
+  auto
+  manual
+}
+
+enum PaymentTransactionStatus {
+  pending
+  completed
+  expired
+  cancelled
+}
+
+model PaymentTransaction {
+  id               Int                      @id @default(autoincrement())
+  code             String                   @unique @db.VarChar(50)
+  userId           Int                      @map("user_id")
+  planId           Int                      @map("plan_id")
+  paymentAccountId Int?                     @map("payment_account_id")
+  billingCycle     BillingCycle             @default(monthly) @map("billing_cycle")
+  amount           Decimal                  @db.Decimal(12, 2)
+  paymentMethod    String                   @default("vietqr") @map("payment_method") @db.VarChar(50)
+  transferContent  String                   @map("transfer_content") @db.VarChar(100)
+  status           PaymentTransactionStatus @default(pending)
+  approvalType     ApprovalType             @default(auto) @map("approval_type")
+  approvedBy       Int?                     @map("approved_by")
+  bankCode         String?                  @map("bank_code") @db.VarChar(50)
+  accountNo        String?                  @map("account_no") @db.VarChar(50)
+  accountHolder    String?                  @map("account_holder") @db.VarChar(100)
+  qrCodeUrl        String?                  @map("qr_code_url") @db.VarChar(500)
+  paymentRef       String?                  @map("payment_ref") @db.VarChar(100)
+  expiredAt        DateTime                 @map("expired_at")
+  paidAt           DateTime?                @map("paid_at")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan           MembershipPlan  @relation(fields: [planId], references: [id])
+  paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  approvedByUser User?           @relation("AdminApprovedTransactions", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@map("payment_transactions")
+}
+
+model PaymentMethod {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  icon        String?  @db.VarChar(255)
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("payment_methods")
+}
+
+
 
 
 

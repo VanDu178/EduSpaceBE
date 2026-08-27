@@ -81,6 +81,48 @@ async function main() {
   // 2. Seed VietQR Banks
   await seedVietqrBanks();
 
+  // 3. Seed Payment Methods
+  const defaultPaymentMethods = [
+    {
+      code: 'vietqr',
+      name: 'Chuyển khoản QR (VietQR)',
+      description: 'Thanh toán quét mã QR qua ứng dụng ngân hàng tự động duyệt nhanh chóng.',
+      icon: 'QrCodeIcon',
+      sortOrder: 1,
+      isActive: true,
+    },
+    {
+      code: 'credit_card',
+      name: 'Thẻ quốc tế / Ghi nợ',
+      description: 'Thanh toán trực tiếp qua thẻ Visa, Mastercard, JCB.',
+      icon: 'CreditCardIcon',
+      sortOrder: 2,
+      isActive: true,
+    },
+    {
+      code: 'e_wallet',
+      name: 'Ví điện tử',
+      description: 'Thanh toán nhanh qua các ví điện tử MoMo, ZaloPay, VNPay.',
+      icon: 'WalletIcon',
+      sortOrder: 3,
+      isActive: true,
+    },
+  ];
+
+  for (const pm of defaultPaymentMethods) {
+    await prisma.paymentMethod.upsert({
+      where: { code: pm.code },
+      update: {
+        name: pm.name,
+        description: pm.description,
+        icon: pm.icon,
+        sortOrder: pm.sortOrder,
+      },
+      create: pm,
+    });
+    console.log(`✅ Seeded payment method: '${pm.code}' (${pm.name})`);
+  }
+
   console.log('🎉 Database seeding completed successfully!');
 }
 

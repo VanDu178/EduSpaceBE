@@ -7,8 +7,63 @@ import { asyncHandler } from '../utils/asyncHandler';
 import type { Request } from 'express';
 
 export interface AuthenticatedRequest extends Request {
-  user?: Omit<User, 'password'>;
+  user?: Omit<User, 'password'> & {
+    isPremium?: boolean;
+    plan?: string | null;
+    planName?: string | null;
+    subscription?: any;
+  };
 }
+
+/**
+ * Helper lấy thông tin User kèm Gói hội viên (UserSubscription) đang hoạt động.
+ */
+export const getUserWithSubscription = async (userId: number) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!user) return null;
+
+  const { password, ...userWithoutPassword } = user;
+
+  const activeSub = await prisma.userSubscription.findFirst({
+    where: {
+      userId,
+      status: 'active',
+      endDate: { gte: new Date() }
+    },
+    include: {
+      plan: true
+    }
+  });
+
+  const isPremium = Boolean(activeSub && activeSub.plan && activeSub.plan.code !== 'FREE');
+  const plan = activeSub?.plan?.code || 'FREE';
+  const planName = activeSub?.plan?.name || 'Gói Free';
+
+  return {
+    ...userWithoutPassword,
+    isPremium,
+    plan,
+    planName,
+    subscription: activeSub
+      ? {
+          id: activeSub.id,
+          code: activeSub.code,
+          billingCycle: activeSub.billingCycle,
+          startDate: activeSub.startDate,
+          endDate: activeSub.endDate,
+          status: activeSub.status,
+          plan: {
+            id: activeSub.plan.id,
+            code: activeSub.plan.code,
+            name: activeSub.plan.name,
+          }
+        }
+      : null
+  };
+};
 
 /**
  * Middleware kiểm tra Access Token hợp lệ.
@@ -35,12 +90,10 @@ export const authMiddleware = asyncHandler(
       );
     }
 
-    // Lấy thông tin user từ database để bảo đảm user vẫn tồn tại
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId }
-    });
+    // Lấy thông tin user từ database kèm thông tin gói active
+    const userWithSub = await getUserWithSubscription(decoded.userId);
 
-    if (!user) {
+    if (!userWithSub) {
       throw new AppError(
         'Unauthorized: User not found',
         401,
@@ -49,7 +102,7 @@ export const authMiddleware = asyncHandler(
     }
 
     // Kiểm tra tài khoản có bị khóa hay không
-    if (user.status === 'locked') {
+    if (userWithSub.status === 'locked') {
       throw new AppError(
         'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
         401,
@@ -57,9 +110,8 @@ export const authMiddleware = asyncHandler(
       );
     }
 
-    // Gán thông tin user (loại bỏ password) vào request
-    const { password, ...userWithoutPassword } = user;
-    req.user = userWithoutPassword;
+    // Gán thông tin user (kèm gói active) vào request
+    req.user = userWithSub;
 
     next();
   }

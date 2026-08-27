@@ -10,7 +10,7 @@ import {
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
-import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
+import { AuthenticatedRequest, getUserWithSubscription } from '../middlewares/authMiddleware';
 import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../config/jwt';
 import { sendResetPasswordEmail, sendForgotPasswordOtpEmail } from '../utils/emailService';
 import { generateUserCode } from '../utils/codeGenerator';
@@ -174,14 +174,15 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   // Gửi Refresh Token về qua HttpOnly Cookie
   res.cookie('refreshToken', refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
 
-  // Trả Access Token về qua JSON body
+  // Trả Access Token về qua JSON body (kèm gói active)
   const { password: _, ...userWithoutPassword } = user;
+  const userWithSub = await getUserWithSubscription(user.id);
 
   return sendSuccess(
     res,
     {
       accessToken,
-      user: userWithoutPassword
+      user: userWithSub || userWithoutPassword
     },
     'Đăng nhập thành công!'
   );
@@ -439,10 +440,11 @@ export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
   res.cookie('refreshToken', refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
 
   const { password: _, ...userWithoutPassword } = user;
+  const userWithSub = await getUserWithSubscription(user.id);
 
   return sendSuccess(
     res,
-    { accessToken, user: userWithoutPassword },
+    { accessToken, user: userWithSub || userWithoutPassword },
     'Đăng nhập bằng Google thành công'
   );
 });
