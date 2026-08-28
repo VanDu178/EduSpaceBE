@@ -336,5 +336,99 @@ export const getTransactions = asyncHandler(async (req: Request, res: Response) 
       totalItems,
       itemsPerPage: limit
     }
-  }, 'Lấy danh sách giao dịch thanh toán thành công');
+  }, 'Lấy danh sách Giao dịch Thanh toán thành công');
 });
+
+/**
+ * User đang đăng nhập tự lấy lịch sử các đơn giao dịch thanh toán VietQR của chính mình
+ */
+export const getMyTransactions = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
+  }
+
+  const transactions = await prisma.paymentTransaction.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      plan: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          monthlyPrice: true,
+          yearlyPrice: true,
+        }
+      },
+      paymentAccount: {
+        include: { bank: true }
+      }
+    }
+  });
+
+  return sendSuccess(res, transactions, 'Lấy lịch sử Giao dịch Thanh toán thành công');
+});
+
+/**
+ * Tải file PDF Hóa đơn điện tử của giao dịch thanh toán (chuẩn mẫu TradeVerse)
+ */
+export const downloadInvoicePdf = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const codeParam = req.params.code;
+  const code = Array.isArray(codeParam) ? codeParam[0] : codeParam;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
+  }
+
+  const transaction = await prisma.paymentTransaction.findUnique({
+    where: { code },
+    include: {
+      user: { select: { name: true, email: true } },
+      plan: { select: { name: true } },
+      paymentAccount: { include: { bank: true } },
+    },
+  });
+
+  if (!transaction) {
+    throw new AppError('Không tìm thấy đơn giao dịch này', 404, 'NOT_FOUND');
+  }
+
+  if (req.user?.role !== 'admin' && transaction.userId !== userId) {
+    throw new AppError('Bạn không có quyền tải hóa đơn này', 403, 'FORBIDDEN');
+  }
+
+  if (transaction.status !== 'completed') {
+    throw new AppError('Chỉ giao dịch đã hoàn tất thanh toán mới có thể tải hóa đơn', 400, 'VALIDATION_ERROR');
+  }
+
+  const { generateInvoicePdfBuffer } = await import('../services/invoicePdfService');
+
+  const pdfBuffer = await generateInvoicePdfBuffer({
+    code: transaction.code,
+    amount: Number(transaction.amount),
+    billingCycle: transaction.billingCycle,
+    status: transaction.status,
+    createdAt: transaction.createdAt,
+    paidAt: transaction.paidAt,
+    expiredAt: transaction.expiredAt,
+    user: transaction.user,
+    plan: transaction.plan,
+    paymentAccount: {
+      accountNo: transaction.accountNo || transaction.paymentAccount?.accountNo,
+      bankName:
+        transaction.paymentAccount?.bank?.shortName ||
+        transaction.paymentAccount?.bank?.name ||
+        transaction.bankCode ||
+        null,
+    },
+  });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="Invoice-TradeVerse-${transaction.code}.pdf"`);
+  res.send(pdfBuffer);
+});
+
+
+

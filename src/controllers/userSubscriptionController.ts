@@ -87,15 +87,15 @@ export const getSubscriptions = asyncHandler(async (req: Request, res: Response)
       totalItems,
       itemsPerPage: limit
     }
-  }, 'Lấy danh sách đăng ký gói hội viên thành công');
+  }, 'Lấy danh sách hội viên thành công');
 });
+
 
 /**
  * User đang đăng nhập tự lấy lịch sử đăng ký của chính mình.
  */
 export const getMySubscriptions = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
-
   if (!userId) {
     throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
   }
@@ -104,7 +104,15 @@ export const getMySubscriptions = asyncHandler(async (req: AuthenticatedRequest,
     where: { userId },
     orderBy: { createdAt: 'desc' },
     include: {
-      plan: true
+      plan: {
+        include: {
+          planFeatures: {
+            include: {
+              feature: true
+            }
+          }
+        }
+      }
     }
   });
 
@@ -210,7 +218,7 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
   // Tính toán thời gian bắt đầu và hết hạn
   const startDate = new Date();
   const endDate = new Date(startDate);
-  
+
   if (billingCycle === 'yearly') {
     endDate.setFullYear(endDate.getFullYear() + 1);
   } else {

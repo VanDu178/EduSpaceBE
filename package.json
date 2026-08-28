@@ -27,7 +27,8 @@
     "google-auth-library": "^11.0.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.0.5",
+    "pdfkit": "^0.20.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -38,6 +39,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^26.1.1",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.6",
     "nodemon": "^3.1.14",
     "prisma": "6.2.0",
     "ts-node": "^10.9.2",

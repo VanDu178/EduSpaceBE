@@ -4,7 +4,9 @@ import {
   getTransactionStatus,
   cancelTransaction,
   approveTransaction,
-  getTransactions
+  getTransactions,
+  getMyTransactions,
+  downloadInvoicePdf,
 } from '../controllers/paymentTransactionController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { adminMiddleware } from '../middlewares/adminMiddleware';
@@ -15,6 +17,8 @@ const router = Router();
 router.get('/status/:code', getTransactionStatus as any);
 
 // Các route yêu cầu đăng nhập User
+router.get('/my-transactions', authMiddleware as any, getMyTransactions as any);
+router.get('/:code/pdf', authMiddleware as any, downloadInvoicePdf as any);
 router.post('/', authMiddleware as any, createTransaction as any);
 router.post('/cancel/:code', authMiddleware as any, cancelTransaction as any);
 
@@ -23,3 +27,4 @@ router.get('/', authMiddleware as any, adminMiddleware as any, getTransactions a
 router.post('/:id/approve', authMiddleware as any, adminMiddleware as any, approveTransaction as any);
 
 export default router;
+
