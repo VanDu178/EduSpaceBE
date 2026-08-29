@@ -8,7 +8,7 @@ import prisma from '../config/db';
 export const checkUserFeatureAccess = async (
   userId: number,
   featureCode: string
-): Promise<{ hasAccess: boolean; reason?: string }> => {
+): Promise<{ hasAccess: boolean; reason?: string; message?: string }> => {
   const activeSub = await prisma.userSubscription.findFirst({
     where: {
       userId,
@@ -33,11 +33,27 @@ export const checkUserFeatureAccess = async (
   }
 
   const planFeature = activeSub.plan.planFeatures.find(
-    (pf) => pf.feature.code === featureCode && pf.isAvailable === true
+    (pf) => pf.feature.code === featureCode
   );
 
-  if (!planFeature) {
+  if (!planFeature || !planFeature.isAvailable) {
     return { hasAccess: false, reason: 'FEATURE_NOT_IN_PLAN' };
+  }
+
+  if (!planFeature.feature.isActive) {
+    return {
+      hasAccess: false,
+      reason: 'FEATURE_DISABLED_SYSTEM',
+      message: 'Tính năng này hiện đang tạm dừng ở cấp hệ thống.'
+    };
+  }
+
+  if (planFeature.disabledAt && new Date() >= new Date(planFeature.disabledAt)) {
+    return {
+      hasAccess: false,
+      reason: 'FEATURE_EXPIRED_GRACE_PERIOD',
+      message: 'Tính năng này đã chính thức ngưng hỗ trợ sau thời gian thông báo.'
+    };
   }
 
   return { hasAccess: true };

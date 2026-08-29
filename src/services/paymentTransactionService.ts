@@ -1,8 +1,8 @@
 import prisma from '../config/db';
 import { AppError } from '../utils/appError';
-import { TRANSACTION_STATUS } from '../constants/transactionConstants';
-import { BILLING_CYCLES } from '../constants/subscriptionConstants';
-import { PAYMENT_METHOD_CODES } from '../constants/paymentMethodCodes';
+import { TRANSACTION_STATUS } from '../modules/paymentTransactions/constants';
+import { BILLING_CYCLES } from '../modules/userSubscriptions/constants';
+import { PAYMENT_METHOD_CODES } from '../modules/paymentMethods/constants';
 import { generateSubscriptionCode } from '../utils/codeGenerator';
 import type { ApprovalType } from '@prisma/client';
 

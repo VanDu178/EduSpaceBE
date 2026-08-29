@@ -19,6 +19,9 @@ yarn-error.log*
 # Personal / Documentation folders
 KienThuc/
 Kiến Thức/
+NANG_CAP.md
+Nâng cấp.md
+
 
 # AI Agent local settings
 .agents/

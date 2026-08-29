@@ -97,6 +97,39 @@ export async function deleteFromSupabase(filePath: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Trích xuất filePath tương đối trong bucket từ Public URL của Supabase.
+ * Ví dụ: "https://xxx.supabase.co/storage/v1/object/public/eduspace/blogs/abc.png" -> "blogs/abc.png"
+ */
+export function extractStoragePath(publicUrl: string): string | null {
+  if (!publicUrl || typeof publicUrl !== 'string') return null;
+
+  if (!publicUrl.startsWith('http://') && !publicUrl.startsWith('https://')) {
+    return publicUrl;
+  }
+
+  try {
+    const urlObj = new URL(publicUrl);
+    const marker = `/storage/v1/object/public/${SUPABASE_BUCKET_NAME}/`;
+    const markerIndex = urlObj.pathname.indexOf(marker);
+
+    if (markerIndex !== -1) {
+      return decodeURIComponent(urlObj.pathname.substring(markerIndex + marker.length));
+    }
+
+    const segments = urlObj.pathname.split('/').filter(Boolean);
+    if (segments.length >= 2) {
+      return decodeURIComponent(segments.slice(-2).join('/'));
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Lỗi khi phân tích storage path từ URL:', err);
+    return null;
+  }
+}
+
+
 function getExtensionFromMime(mimeType: string): string {
   const mimeMap: Record<string, string> = {
     'image/jpeg': '.jpg',
