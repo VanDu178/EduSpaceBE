@@ -4,6 +4,7 @@ import {
   getTransactionStatus,
   cancelTransaction,
   approveTransaction,
+  handleWebhook,
   getTransactions,
   getMyTransactions,
   downloadInvoicePdf,
@@ -13,8 +14,9 @@ import { adminMiddleware } from '../middlewares/adminMiddleware';
 
 const router = Router();
 
-// Route công khai kiểm tra trạng thái đơn (Client polling)
+// Route công khai kiểm tra trạng thái đơn (Client polling) & Xử lý Webhook ngân hàng
 router.get('/status/:code', getTransactionStatus as any);
+router.post('/webhook', handleWebhook as any);
 
 // Các route yêu cầu đăng nhập User
 router.get('/my-transactions', authMiddleware as any, getMyTransactions as any);

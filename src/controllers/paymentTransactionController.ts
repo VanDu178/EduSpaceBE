@@ -3,8 +3,13 @@ import prisma from '../config/db';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/responseHelper';
-import { generatePaymentTransactionCode, generateSubscriptionCode } from '../utils/codeGenerator';
+import { generatePaymentTransactionCode } from '../utils/codeGenerator';
 import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
+import { PAYMENT_METHOD_CODES } from '../constants/paymentMethodCodes';
+import { BILLING_CYCLES } from '../constants/subscriptionConstants';
+import { TRANSACTION_STATUS } from '../constants/transactionConstants';
+import { fulfillPaymentTransaction } from '../services/paymentTransactionService';
+
 
 /**
  * Khởi tạo đơn thanh toán VietQR cho gói dịch vụ
@@ -12,14 +17,15 @@ import type { AuthenticatedRequest } from '../middlewares/authMiddleware';
 export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   if (!userId) {
-    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
+    throw new AppError('Vui lòng đăng nhập để thực hiện giao dịch', 401, 'UNAUTHORIZED');
   }
 
-  const { planId, billingCycle = 'monthly' } = req.body;
+  const { planId, billingCycle = BILLING_CYCLES.MONTHLY, paymentMethod = PAYMENT_METHOD_CODES.VIETQR } = req.body;
+  const normalizedPaymentMethod = String(paymentMethod).trim().toUpperCase();
 
   const parsedPlanId = parseInt(planId, 10);
   if (isNaN(parsedPlanId)) {
-    throw new AppError('Gói hội viên không hợp lệ', 400, 'VALIDATION_ERROR');
+    throw new AppError('Gói dịch vụ đang được bảo trì hoặc không hợp lệ. Vui lòng liên hệ hỗ trợ để được trợ giúp', 400, 'VALIDATION_ERROR');
   }
 
   // 1. Kiểm tra thông tin gói
@@ -28,11 +34,27 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   });
 
   if (!plan) {
-    throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
+    throw new AppError('Gói dịch vụ không tồn tại hoặc đã ngưng áp dụng', 404, 'NOT_FOUND');
   }
 
   if (!plan.isActive) {
-    throw new AppError('Gói hội viên này hiện đang tạm ẩn, không thể đăng ký', 400, 'VALIDATION_ERROR');
+    throw new AppError('Gói dịch vụ này hiện đang tạm ngưng đăng ký. Vui lòng chọn gói khác', 400, 'VALIDATION_ERROR');
+  }
+
+  // Kiểm tra nếu người dùng đã sở hữu gói tương đương hoặc cao hơn
+  const activeSub = await prisma.userSubscription.findFirst({
+    where: { userId, status: 'active' },
+    include: { plan: true }
+  });
+
+  if (activeSub && activeSub.plan) {
+    if (plan.tierLevel <= activeSub.plan.tierLevel) {
+      throw new AppError(
+        'Bạn đang sở hữu gói dịch vụ này hoặc gói cao hơn. Không thể đăng ký gói cùng cấp hoặc cấp thấp hơn.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
   }
 
   // 2. Tìm tài khoản ngân hàng nhận tiền mặc định của hệ thống
@@ -49,11 +71,11 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   }
 
   if (!paymentAccount) {
-    throw new AppError('Hệ thống chưa cấu hình tài khoản nhận tiền. Vui lòng liên hệ quản trị viên.', 500, 'INTERNAL_SERVER_ERROR');
+    throw new AppError('Phương thức nhận tiền hiện chưa sẵn sàng. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ', 500, 'INTERNAL_SERVER_ERROR');
   }
 
   // 3. Tính số tiền thanh toán (tháng hoặc năm)
-  const amount = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
+  const amount = billingCycle === BILLING_CYCLES.YEARLY ? plan.yearlyPrice : plan.monthlyPrice;
 
   // 4. Sinh mã đơn ngẫu nhiên duy nhất
   let code = generatePaymentTransactionCode();
@@ -78,11 +100,11 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
       userId,
       planId: parsedPlanId,
       paymentAccountId: paymentAccount.id,
-      billingCycle: billingCycle === 'yearly' ? 'yearly' : 'monthly',
+      billingCycle: billingCycle === BILLING_CYCLES.YEARLY ? BILLING_CYCLES.YEARLY : BILLING_CYCLES.MONTHLY,
       amount,
-      paymentMethod: 'vietqr',
+      paymentMethod: normalizedPaymentMethod,
       transferContent,
-      status: 'pending',
+      status: TRANSACTION_STATUS.PENDING,
       bankCode: paymentAccount.bankCode,
       accountNo: paymentAccount.accountNo,
       accountHolder: paymentAccount.accountHolder,
@@ -105,7 +127,7 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
     }
   });
 
-  return sendSuccess(res, transaction, 'Khởi tạo đơn thanh toán VietQR thành công', 201);
+  return sendSuccess(res, transaction, 'Vui lòng quét mã VietQR để hoàn tất chuyển khoản.', 201);
 });
 
 /**
@@ -115,10 +137,10 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
   const { code } = req.params;
 
   if (!code) {
-    throw new AppError('Mã đơn hàng không hợp lệ', 400, 'VALIDATION_ERROR');
+    throw new AppError('Mã giao dịch không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  const transaction = await prisma.paymentTransaction.findUnique({
+  let transaction = await prisma.paymentTransaction.findUnique({
     where: { code: String(code).trim() },
     include: {
       plan: true,
@@ -129,16 +151,38 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
   });
 
   if (!transaction) {
-    throw new AppError('Giao dịch không tồn tại', 404, 'NOT_FOUND');
+    throw new AppError('Không tìm thấy thông tin giao dịch', 404, 'NOT_FOUND');
   }
 
   // Tự động cập nhật hết hạn nếu quá 15 phút mà vẫn pending
-  if (transaction.status === 'pending' && new Date() > new Date(transaction.expiredAt)) {
-    const updated = await prisma.paymentTransaction.update({
+  if (transaction.status === TRANSACTION_STATUS.PENDING && new Date() > new Date(transaction.expiredAt)) {
+    transaction = await prisma.paymentTransaction.update({
       where: { id: transaction.id },
-      data: { status: 'expired' }
+      data: { status: TRANSACTION_STATUS.EXPIRED },
+      include: {
+        plan: true,
+        paymentAccount: {
+          include: { bank: true }
+        }
+      }
     });
-    return sendSuccess(res, { status: updated.status, expiredAt: updated.expiredAt }, 'Đơn thanh toán đã hết hạn');
+  }
+
+  let message = 'Trạng thái giao dịch thanh toán';
+  switch (transaction.status) {
+    case TRANSACTION_STATUS.COMPLETED:
+      message = 'Thanh toán thành công. Gói dịch vụ đã được kích hoạt!';
+      break;
+    case TRANSACTION_STATUS.EXPIRED:
+      message = 'Giao dịch đã hết thời hạn thanh toán (15 phút). Vui lòng tạo giao dịch mới.';
+      break;
+    case TRANSACTION_STATUS.CANCELLED:
+      message = 'Giao dịch đã bị hủy. Vui lòng tạo giao dịch mới hoặc liên hệ bộ phận CSKH.';
+      break;
+    case TRANSACTION_STATUS.PENDING:
+    default:
+      message = 'Giao dịch đang chờ thanh toán. Vui lòng quét mã VietQR hoặc chuyển khoản đúng nội dung.';
+      break;
   }
 
   return sendSuccess(res, {
@@ -152,7 +196,7 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
     paidAt: transaction.paidAt,
     paymentAccount: transaction.paymentAccount,
     plan: transaction.plan
-  }, 'Lấy trạng thái thanh toán thành công');
+  }, message);
 });
 
 /**
@@ -167,115 +211,135 @@ export const cancelTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   });
 
   if (!transaction) {
-    throw new AppError('Giao dịch không tồn tại', 404, 'NOT_FOUND');
+    throw new AppError('Không tìm thấy giao dịch', 404, 'NOT_FOUND');
   }
 
   if (req.user?.role !== 'admin' && transaction.userId !== userId) {
-    throw new AppError('Bạn không có quyền hủy giao dịch này', 403, 'FORBIDDEN');
+    throw new AppError('Bạn không có quyền thao tác trên giao dịch này', 403, 'FORBIDDEN');
   }
 
-  if (transaction.status !== 'pending') {
-    throw new AppError('Chỉ có thể hủy giao dịch đang chờ thanh toán', 400, 'VALIDATION_ERROR');
+  if (transaction.status !== TRANSACTION_STATUS.PENDING) {
+    throw new AppError('Chỉ có thể hủy giao dịch đang ở trạng thái chờ', 400, 'VALIDATION_ERROR');
   }
 
   const updated = await prisma.paymentTransaction.update({
     where: { id: transaction.id },
-    data: { status: 'cancelled' }
+    data: { status: TRANSACTION_STATUS.CANCELLED }
   });
 
-  return sendSuccess(res, updated, 'Hủy giao dịch thanh toán thành công');
+  return sendSuccess(res, updated, 'Hủy giao dịch thành công');
 });
 
 /**
- * Duyệt thanh toán thành công (Admin bấm duyệt hoặc Webhook gọi)
+ * Duyệt thanh toán thành công thủ công (Admin)
  */
 export const approveTransaction = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const txId = parseInt(id as string, 10);
   const { paymentRef } = req.body;
 
-  const transaction = await prisma.paymentTransaction.findUnique({
-    where: { id: txId },
-    include: { plan: true }
+  if (isNaN(txId)) {
+    throw new AppError('Mã giao dịch không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  const { transaction, alreadyCompleted } = await fulfillPaymentTransaction({
+    txId,
+    paymentRef,
+    approvalType: 'manual',
+    approvedBy: req.user?.id
+  });
+
+  const message = alreadyCompleted
+    ? 'Giao dịch đã được duyệt trước đó'
+    : 'Duyệt thanh toán và kích hoạt gói thành công';
+
+  return sendSuccess(res, transaction, message);
+});
+
+/**
+ * Webhook xử lý thanh toán tự động (Ngân hàng / Cổng thanh toán gọi)
+ * Route công khai: POST /api/v1/payment-transactions/webhook
+ */
+export const handleWebhook = asyncHandler(async (req: Request, res: Response) => {
+  // 1. Kiểm tra Webhook Secret Token / Header (nếu hệ thống có cấu hình WEBHOOK_SECRET)
+  const webhookSecret = process.env.WEBHOOK_SECRET || process.env.SEPAY_WEBHOOK_API_KEY;
+  if (webhookSecret) {
+    const authHeader = req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-sepay-api-key'];
+    const token = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const bearerToken = token?.replace(/^Bearer\s+/i, '');
+
+    if (!token || (token !== webhookSecret && bearerToken !== webhookSecret)) {
+      throw new AppError('Xác thực Webhook không hợp lệ', 401, 'UNAUTHORIZED');
+    }
+  }
+
+  // 2. Trích xuất dữ liệu từ Webhook Payload
+  // Hỗ trợ cấu trúc payload linh hoạt từ các đơn vị như SePAY, Casso, VietQR, PayOS
+  const payload = req.body || {};
+
+  // Tìm chuỗi chứa mã giao dịch (VD: content, transferContent, code, description, des, orderCode)
+  const rawContent = String(
+    payload.content ||
+    payload.transferContent ||
+    payload.code ||
+    payload.description ||
+    payload.des ||
+    payload.orderCode ||
+    ''
+  ).trim();
+
+  // Tìm mã đơn dạng TRV... trong chuỗi nội dung chuyển khoản
+  const matchedCode = rawContent.match(/TRV[A-Z0-9]{6,12}/i)?.[0]?.toUpperCase() || rawContent.toUpperCase();
+
+  if (!matchedCode) {
+    return sendSuccess(res, { processed: false }, 'Nội dung chuyển khoản không chứa mã giao dịch hợp lệ');
+  }
+
+  // Tìm bản ghi giao dịch theo code hoặc transferContent
+  const transaction = await prisma.paymentTransaction.findFirst({
+    where: {
+      OR: [
+        { code: matchedCode },
+        { transferContent: matchedCode }
+      ]
+    }
   });
 
   if (!transaction) {
-    throw new AppError('Giao dịch không tồn tại', 404, 'NOT_FOUND');
+    return sendSuccess(res, { processed: false, code: matchedCode }, 'Không tìm thấy giao dịch tương ứng trên hệ thống');
   }
 
-  if (transaction.status === 'completed') {
-    return sendSuccess(res, transaction, 'Giao dịch đã được duyệt trước đó');
+  // 3. Trích xuất thông tin giao dịch bổ sung (Mã tham chiếu ngân hàng & Số tiền)
+  const paymentRef = String(payload.referenceCode || payload.referenceNum || payload.transactionId || payload.id || payload.paymentRef || '').trim() || null;
+  const transferAmount = Number(payload.amount || payload.transferAmount || 0);
+
+  // 4. Nếu truyền số tiền nhận được, kiểm tra khớp số tiền đơn hàng
+  if (transferAmount > 0 && transferAmount < Number(transaction.amount)) {
+    throw new AppError(
+      `Số tiền thanh toán (${transferAmount.toLocaleString('vi-VN')} đ) nhỏ hơn giá trị đơn hàng (${Number(transaction.amount).toLocaleString('vi-VN')} đ)`,
+      400,
+      'VALIDATION_ERROR'
+    );
   }
 
-  // 1. Chuyển trạng thái PaymentTransaction sang completed
-  const adminId = req.user?.id;
-  const updatedTransaction = await prisma.paymentTransaction.update({
-    where: { id: txId },
-    data: {
-      status: 'completed',
-      approvalType: 'manual',
-      approvedBy: adminId || null,
-      paidAt: new Date(),
-      paymentRef: paymentRef ? String(paymentRef).trim() : null
-    },
-    include: {
-      plan: {
-        select: { id: true, code: true, name: true }
-      },
-      user: {
-        select: { id: true, code: true, email: true, name: true, avatarUrl: true }
-      },
-      approvedByUser: {
-        select: { id: true, code: true, email: true, name: true, avatarUrl: true }
-      }
-    }
+  // 5. Thực hiện tự động duyệt đơn và kích hoạt gói
+  const { transaction: updatedTransaction, alreadyCompleted } = await fulfillPaymentTransaction({
+    txId: transaction.id,
+    paymentRef,
+    approvalType: 'auto',
+    approvedBy: null
   });
 
-  // 2. Tự động kích hoạt / gia hạn UserSubscription
-  const startDate = new Date();
-  const endDate = new Date(startDate);
-  if (transaction.billingCycle === 'yearly') {
-    endDate.setFullYear(endDate.getFullYear() + 1);
-  } else {
-    endDate.setMonth(endDate.getMonth() + 1);
-  }
+  const message = alreadyCompleted
+    ? 'Webhook ghi nhận: Giao dịch đã hoàn tất từ trước'
+    : 'Xử lý webhook thanh toán thành công. Đã kích hoạt gói dịch vụ';
 
-  // Hủy các gói active cũ của User
-  await prisma.userSubscription.updateMany({
-    where: {
-      userId: transaction.userId,
-      status: 'active'
-    },
-    data: {
-      status: 'cancelled',
-      cancelledAt: new Date(),
-      cancelReason: 'Nâng cấp gói mới qua VietQR'
-    }
-  });
-
-  // Tạo mới UserSubscription active
-  const tempSub = await prisma.userSubscription.create({
-    data: {
-      code: `SUB-TEMP-${Date.now()}`,
-      userId: transaction.userId,
-      planId: transaction.planId,
-      billingCycle: transaction.billingCycle,
-      startDate,
-      endDate,
-      status: 'active',
-      pricePaid: transaction.amount,
-      paymentMethod: 'vietqr',
-      paymentRef: updatedTransaction.paymentRef
-    }
-  });
-
-  const subCode = generateSubscriptionCode(tempSub.id);
-  await prisma.userSubscription.update({
-    where: { id: tempSub.id },
-    data: { code: subCode }
-  });
-
-  return sendSuccess(res, updatedTransaction, 'Duyệt thanh toán và kích hoạt gói thành công');
+  return sendSuccess(res, {
+    transactionId: updatedTransaction.id,
+    code: updatedTransaction.code,
+    status: updatedTransaction.status,
+    alreadyCompleted
+  }, message);
 });
 
 /**
@@ -312,13 +376,23 @@ export const getTransactions = asyncHandler(async (req: Request, res: Response) 
     orderBy: { createdAt: 'desc' },
     include: {
       user: {
-        select: { id: true, code: true, email: true, name: true, avatarUrl: true }
+        select: {
+          id: true,
+          code: true,
+          email: true,
+          name: true,
+          avatarUrl: true,
+          subscriptions: {
+            where: { status: 'active' },
+            include: { plan: true }
+          }
+        }
       },
       approvedByUser: {
         select: { id: true, code: true, email: true, name: true, avatarUrl: true }
       },
       plan: {
-        select: { id: true, code: true, name: true }
+        select: { id: true, code: true, name: true, tierLevel: true }
       },
       paymentAccount: {
         include: { bank: true }
@@ -345,7 +419,7 @@ export const getTransactions = asyncHandler(async (req: Request, res: Response) 
 export const getMyTransactions = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   if (!userId) {
-    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
+    throw new AppError('Vui lòng đăng nhập để xem lịch sử giao dịch', 401, 'UNAUTHORIZED');
   }
 
   const transactions = await prisma.paymentTransaction.findMany({
@@ -359,6 +433,7 @@ export const getMyTransactions = asyncHandler(async (req: AuthenticatedRequest, 
           name: true,
           monthlyPrice: true,
           yearlyPrice: true,
+          tierLevel: true,
         }
       },
       paymentAccount: {
@@ -367,7 +442,7 @@ export const getMyTransactions = asyncHandler(async (req: AuthenticatedRequest, 
     }
   });
 
-  return sendSuccess(res, transactions, 'Lấy lịch sử Giao dịch Thanh toán thành công');
+  return sendSuccess(res, transactions, 'Lấy lịch sử giao dịch thành công');
 });
 
 /**
@@ -379,7 +454,7 @@ export const downloadInvoicePdf = asyncHandler(async (req: AuthenticatedRequest,
   const userId = req.user?.id;
 
   if (!userId) {
-    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
+    throw new AppError('Vui lòng đăng nhập để tải hóa đơn', 401, 'UNAUTHORIZED');
   }
 
   const transaction = await prisma.paymentTransaction.findUnique({
@@ -387,20 +462,19 @@ export const downloadInvoicePdf = asyncHandler(async (req: AuthenticatedRequest,
     include: {
       user: { select: { name: true, email: true } },
       plan: { select: { name: true } },
-      paymentAccount: { include: { bank: true } },
     },
   });
 
   if (!transaction) {
-    throw new AppError('Không tìm thấy đơn giao dịch này', 404, 'NOT_FOUND');
+    throw new AppError('Không tìm thấy thông tin giao dịch', 404, 'NOT_FOUND');
   }
 
   if (req.user?.role !== 'admin' && transaction.userId !== userId) {
-    throw new AppError('Bạn không có quyền tải hóa đơn này', 403, 'FORBIDDEN');
+    throw new AppError('Bạn không có quyền truy cập hóa đơn của giao dịch này', 403, 'FORBIDDEN');
   }
 
-  if (transaction.status !== 'completed') {
-    throw new AppError('Chỉ giao dịch đã hoàn tất thanh toán mới có thể tải hóa đơn', 400, 'VALIDATION_ERROR');
+  if (transaction.status !== TRANSACTION_STATUS.COMPLETED) {
+    throw new AppError('Chỉ có thể tải hóa đơn đối với giao dịch đã hoàn tất', 400, 'VALIDATION_ERROR');
   }
 
   const { generateInvoicePdfBuffer } = await import('../services/invoicePdfService');
@@ -415,14 +489,6 @@ export const downloadInvoicePdf = asyncHandler(async (req: AuthenticatedRequest,
     expiredAt: transaction.expiredAt,
     user: transaction.user,
     plan: transaction.plan,
-    paymentAccount: {
-      accountNo: transaction.accountNo || transaction.paymentAccount?.accountNo,
-      bankName:
-        transaction.paymentAccount?.bank?.shortName ||
-        transaction.paymentAccount?.bank?.name ||
-        transaction.bankCode ||
-        null,
-    },
   });
 
   res.setHeader('Content-Type', 'application/pdf');

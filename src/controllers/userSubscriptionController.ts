@@ -254,7 +254,7 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
       endDate,
       status: status as any,
       pricePaid,
-      paymentMethod: paymentMethod ? String(paymentMethod).trim() : null,
+      paymentMethod: paymentMethod ? String(paymentMethod).trim().toUpperCase() : null,
       paymentRef: paymentRef ? String(paymentRef).trim() : null,
       autoRenew: Boolean(autoRenew)
     }

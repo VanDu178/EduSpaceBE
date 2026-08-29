@@ -293,6 +293,20 @@ export const deletePaymentAccount = asyncHandler(async (req: Request, res: Respo
     throw new AppError('Tài khoản thanh toán không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // Kiểm tra xem tài khoản này đã có giao dịch phát sinh chưa
+  const existingTransaction = await prisma.paymentTransaction.findFirst({
+    where: { paymentAccountId: numericId },
+    select: { id: true }
+  });
+
+  if (existingTransaction) {
+    throw new AppError(
+      'Tài khoản thanh toán này đã có lịch sử giao dịch, không thể xóa. Vui lòng chuyển trạng thái sang vô hiệu hóa.',
+      400,
+      'VALIDATION_ERROR'
+    );
+  }
+
   await prisma.paymentAccount.delete({
     where: { id: numericId }
   });

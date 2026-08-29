@@ -151,6 +151,33 @@ export const toggleVietqrBankStatus = asyncHandler(async (req: Request, res: Res
     throw new AppError('Ngân hàng không tồn tại trong hệ thống', 404, 'NOT_FOUND');
   }
 
+  // Nếu đang muốn vô hiệu hóa ngân hàng (từ active -> inactive), kiểm tra xem có tài khoản thanh toán nào đang hoạt động liên kết không
+  if (existingBank.isActive) {
+    const activePaymentAccounts = await prisma.paymentAccount.findMany({
+      where: {
+        bankCode: existingBank.code,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        accountNo: true,
+        accountHolder: true,
+        isDefault: true,
+      },
+    });
+
+    if (activePaymentAccounts.length > 0) {
+      const defaultAccount = activePaymentAccounts.find((acc) => acc.isDefault);
+      let errorMessage = `Không thể vô hiệu hóa ngân hàng "${existingBank.shortName}" vì đang có ${activePaymentAccounts.length} tài khoản thanh toán đang hoạt động liên kết với ngân hàng này.`;
+      if (defaultAccount) {
+        errorMessage += ` (Bao gồm tài khoản mặc định số ${defaultAccount.accountNo} - ${defaultAccount.accountHolder}).`;
+      }
+      errorMessage += ` Vui lòng tắt hoặc thay đổi ngân hàng cho các tài khoản thanh toán này trước.`;
+
+      throw new AppError(errorMessage, 400, 'BANK_IN_USE');
+    }
+  }
+
   const updatedBank = await prisma.vietqrBank.update({
     where: { id: numericId },
     data: { isActive: !existingBank.isActive },

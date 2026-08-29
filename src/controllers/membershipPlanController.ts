@@ -27,6 +27,12 @@ export const getMembershipPlans = asyncHandler(async (req: Request, res: Respons
         include: {
           feature: true
         }
+      },
+      _count: {
+        select: {
+          subscriptions: true,
+          paymentTransactions: true
+        }
       }
     },
     orderBy: [
@@ -35,7 +41,13 @@ export const getMembershipPlans = asyncHandler(async (req: Request, res: Respons
     ]
   });
 
-  return sendSuccess(res, plans, 'Lấy danh sách gói hội viên thành công');
+  const mappedPlans = plans.map((plan) => ({
+    ...plan,
+    subscriberCount: (plan._count?.subscriptions || 0) + (plan._count?.paymentTransactions || 0),
+    hasSubscribers: ((plan._count?.subscriptions || 0) + (plan._count?.paymentTransactions || 0)) > 0
+  }));
+
+  return sendSuccess(res, mappedPlans, 'Lấy danh sách gói hội viên thành công');
 });
 
 /**
@@ -175,6 +187,13 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
     throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // Chặn cập nhật nếu gói đã có lượt đăng ký/giao dịch
+  const subCount = await prisma.userSubscription.count({ where: { planId } });
+  const txCount = await prisma.paymentTransaction.count({ where: { planId } });
+  if (subCount > 0 || txCount > 0) {
+    throw new AppError('Gói hội viên đã có người đăng ký hoặc có lịch sử giao dịch. Không thể cập nhật gói này.', 400, 'VALIDATION_ERROR');
+  }
+
   const {
     name,
     tagLine,
@@ -271,6 +290,13 @@ export const toggleMembershipPlanStatus = asyncHandler(async (req: Request, res:
     throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // Chặn chuyển đổi trạng thái nếu gói đã có lượt đăng ký/giao dịch
+  const subCount = await prisma.userSubscription.count({ where: { planId } });
+  const txCount = await prisma.paymentTransaction.count({ where: { planId } });
+  if (subCount > 0 || txCount > 0) {
+    throw new AppError('Gói hội viên đã có người đăng ký hoặc có lịch sử giao dịch. Không thể chuyển đổi trạng thái gói này.', 400, 'VALIDATION_ERROR');
+  }
+
   const updated = await prisma.membershipPlan.update({
     where: { id: planId },
     data: { isActive: !existing.isActive },
@@ -310,14 +336,17 @@ export const deleteMembershipPlan = asyncHandler(async (req: Request, res: Respo
     throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
   }
 
-  // Kiểm tra xem đã có lượt đăng ký nào liên quan tới gói này chưa
+  // Kiểm tra xem đã có lượt đăng ký hoặc giao dịch nào liên quan tới gói này chưa
   const subCount = await prisma.userSubscription.count({
     where: { planId }
   });
+  const txCount = await prisma.paymentTransaction.count({
+    where: { planId }
+  });
 
-  if (subCount > 0) {
+  if (subCount > 0 || txCount > 0) {
     throw new AppError(
-      `Không thể xóa gói "${existing.name}" vì đang có ${subCount} lịch sử đăng ký sử dụng. Bạn có thể chọn Ẩn gói này.`,
+      `Không thể xóa gói "${existing.name}" vì đã có lịch sử đăng ký hoặc giao dịch sử dụng.`,
       400,
       'VALIDATION_ERROR'
     );

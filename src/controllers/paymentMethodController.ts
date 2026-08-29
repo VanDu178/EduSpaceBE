@@ -87,10 +87,8 @@ export const createPaymentMethod = asyncHandler(async (req: Request, res: Respon
     });
   }
 
-  const formattedCode = code.trim().toLowerCase();
-
   const existingMethod = await prisma.paymentMethod.findUnique({
-    where: { code: formattedCode }
+    where: { code: code }
   });
 
   if (existingMethod) {
@@ -101,7 +99,7 @@ export const createPaymentMethod = asyncHandler(async (req: Request, res: Respon
 
   const paymentMethod = await prisma.paymentMethod.create({
     data: {
-      code: formattedCode,
+      code: code.trim(),
       name: name.trim(),
       description: description ? description.trim() : null,
       icon: icon ? icon.trim() : null,
@@ -134,8 +132,7 @@ export const updatePaymentMethod = asyncHandler(async (req: Request, res: Respon
   }
 
   if (code !== undefined) {
-    const formattedCode = code.trim().toLowerCase();
-    if (formattedCode !== existingMethod.code) {
+    if (code.trim() !== existingMethod.code) {
       throw new AppError('Không được phép sửa mã hệ thống (code) của phương thức thanh toán.', 400, 'VALIDATION_ERROR');
     }
   }
@@ -217,6 +214,24 @@ export const deletePaymentMethod = asyncHandler(async (req: Request, res: Respon
 
   if (!existingMethod) {
     throw new AppError('Phương thức thanh toán không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  // Kiểm tra xem phương thức thanh toán đã được sử dụng trong giao dịch hoặc gói đăng ký chưa
+  const [usedInTransaction, usedInSubscription] = await Promise.all([
+    prisma.paymentTransaction.findFirst({
+      where: { paymentMethod: existingMethod.code }
+    }),
+    prisma.userSubscription.findFirst({
+      where: { paymentMethod: existingMethod.code }
+    })
+  ]);
+
+  if (usedInTransaction || usedInSubscription) {
+    throw new AppError(
+      'Phương thức thanh toán này đã được sử dụng trong hệ thống, không thể xóa. Bạn có thể vô hiệu hóa trạng thái thay vì xóa.',
+      400,
+      'PAYMENT_METHOD_IN_USE'
+    );
   }
 
   await prisma.paymentMethod.delete({
