@@ -20,7 +20,7 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
     throw new AppError('Vui lòng đăng nhập để thực hiện giao dịch', 401, 'UNAUTHORIZED');
   }
 
-  const { planId, billingCycle = BILLING_CYCLES.MONTHLY, paymentMethod } = req.body;
+  const { planId, billingCycle = BILLING_CYCLES.MONTHLY, paymentMethod, expectedPrice } = req.body;
 
   if (!paymentMethod || !String(paymentMethod).trim()) {
     throw new AppError('Phương thức thanh toán là bắt buộc.', 400, 'VALIDATION_ERROR');
@@ -38,12 +38,12 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   }
 
   if (!targetPaymentMethod.isActive) {
-    throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng. Vui lòng chọn phương thức khác.', 400, 'VALIDATION_ERROR');
+    throw new AppError('Phương thức thanh toán đã chọn hiện đang bảo trì. Vui lòng chọn phương thức khác.', 400, 'PAYMENT_METHOD_UNAVAILABLE');
   }
 
   const parsedPlanId = parseInt(planId, 10);
   if (isNaN(parsedPlanId)) {
-    throw new AppError('Gói dịch vụ đang được bảo trì hoặc không hợp lệ. Vui lòng liên hệ hỗ trợ để được trợ giúp', 400, 'VALIDATION_ERROR');
+    throw new AppError('Gói dịch vụ đang được bảo trì hoặc không hợp lệ. Vui lòng liên hệ hỗ trợ để được trợ giúp', 400, 'PLAN_INACTIVE');
   }
 
   // 1. Kiểm tra thông tin gói
@@ -56,7 +56,7 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   }
 
   if (!plan.isActive) {
-    throw new AppError('Gói dịch vụ này hiện đang tạm ngưng đăng ký. Vui lòng chọn gói khác', 400, 'VALIDATION_ERROR');
+    throw new AppError('Gói dịch vụ này hiện đang tạm ngưng mở bán. Vui lòng chọn gói dịch vụ khác.', 400, 'PLAN_INACTIVE');
   }
 
   // Kiểm tra nếu người dùng đã sở hữu gói tương đương hoặc cao hơn
@@ -75,25 +75,30 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
     }
   }
 
-  // 2. Tìm tài khoản ngân hàng nhận tiền mặc định của hệ thống
-  let paymentAccount = await prisma.paymentAccount.findFirst({
-    where: { isDefault: true },
+  // 2. Tìm tài khoản ngân hàng nhận tiền mặc định của hệ thống (bắt buộc isDefault = true và ngân hàng đang hoạt động)
+  const paymentAccount = await prisma.paymentAccount.findFirst({
+    where: {
+      isDefault: true,
+      bank: { isActive: true }
+    },
     include: { bank: true }
   });
 
-  if (!paymentAccount) {
-    paymentAccount = await prisma.paymentAccount.findFirst({
-      include: { bank: true },
-      orderBy: { createdAt: 'desc' }
-    });
-  }
-
-  if (!paymentAccount) {
-    throw new AppError('Phương thức nhận tiền hiện chưa sẵn sàng. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ', 500, 'INTERNAL_SERVER_ERROR');
+  if (!paymentAccount || !paymentAccount.bank || !paymentAccount.bank.isActive) {
+    throw new AppError('Hệ thống nhận tiền hiện đang bảo trì. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ.', 400, 'PAYMENT_METHOD_UNAVAILABLE');
   }
 
   // 3. Tính số tiền thanh toán (tháng hoặc năm)
   const amount = billingCycle === BILLING_CYCLES.YEARLY ? plan.yearlyPrice : plan.monthlyPrice;
+
+  // Kiểm tra chống sửa giá từ phía client (price anti-tamper)
+  if (expectedPrice !== undefined && expectedPrice !== null) {
+    const numericExpectedPrice = Number(expectedPrice);
+    const numericServerAmount = Number(amount);
+    if (numericExpectedPrice !== numericServerAmount) {
+      throw new AppError('Thông tin giá của gói dịch vụ vừa được cập nhật. Vui lòng kiểm tra lại đơn hàng.', 400, 'PLAN_PRICE_CHANGED');
+    }
+  }
 
   // 4. Sinh mã đơn ngẫu nhiên duy nhất
   let code = generatePaymentTransactionCode();
@@ -325,6 +330,16 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
 
   if (!transaction) {
     return sendSuccess(res, { processed: false, code: matchedCode }, 'Không tìm thấy giao dịch tương ứng trên hệ thống');
+  }
+
+  // Check Idempotency: Nếu đơn đã ở trạng thái completed từ trước, phản hồi ngay thành công về cho Webhook caller
+  if (transaction.status === TRANSACTION_STATUS.COMPLETED) {
+    return sendSuccess(res, {
+      transactionId: transaction.id,
+      code: transaction.code,
+      status: transaction.status,
+      alreadyCompleted: true
+    }, 'Webhook ghi nhận: Giao dịch đã hoàn tất từ trước');
   }
 
   // 3. Trích xuất thông tin giao dịch bổ sung (Mã tham chiếu ngân hàng & Số tiền)

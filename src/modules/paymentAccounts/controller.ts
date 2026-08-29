@@ -46,26 +46,15 @@ export const getPaymentAccounts = asyncHandler(async (req: Request, res: Respons
  * Lấy tài khoản thanh toán mặc định đang nhận tiền (Dành cho Checkout Client).
  */
 export const getDefaultPaymentAccount = asyncHandler(async (_req: Request, res: Response) => {
-  let defaultAccount = await prisma.paymentAccount.findFirst({
+  const defaultAccount = await prisma.paymentAccount.findFirst({
     where: {
-      isDefault: true
+      isDefault: true,
+      bank: { isActive: true }
     },
     include: {
       bank: true
     }
   });
-
-  // Nếu chưa chọn tài khoản mặc định, tự động lấy tài khoản mới nhất
-  if (!defaultAccount) {
-    defaultAccount = await prisma.paymentAccount.findFirst({
-      include: {
-        bank: true
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
-  }
 
   return sendSuccess(res, { paymentAccount: defaultAccount }, 'Lấy tài khoản thanh toán mặc định thành công');
 });
