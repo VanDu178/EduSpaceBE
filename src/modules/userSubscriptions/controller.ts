@@ -215,6 +215,20 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
     throw new AppError('Gói hội viên này hiện đang tạm ẩn, không thể đăng ký', 400, 'VALIDATION_ERROR');
   }
 
+  // Kiểm tra phương thức thanh toán nếu được cung cấp
+  if (paymentMethod && String(paymentMethod).trim()) {
+    const normalizedCode = String(paymentMethod).trim().toUpperCase();
+    const existingMethod = await prisma.paymentMethod.findUnique({
+      where: { code: normalizedCode }
+    });
+    if (!existingMethod) {
+      throw new AppError('Phương thức thanh toán không tồn tại trong hệ thống.', 400, 'VALIDATION_ERROR');
+    }
+    if (!existingMethod.isActive) {
+      throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng.', 400, 'VALIDATION_ERROR');
+    }
+  }
+
   // Tính toán thời gian bắt đầu và hết hạn
   const startDate = new Date();
   const endDate = new Date(startDate);

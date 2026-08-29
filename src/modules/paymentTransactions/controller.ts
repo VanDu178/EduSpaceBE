@@ -20,8 +20,26 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
     throw new AppError('Vui lòng đăng nhập để thực hiện giao dịch', 401, 'UNAUTHORIZED');
   }
 
-  const { planId, billingCycle = BILLING_CYCLES.MONTHLY, paymentMethod = PAYMENT_METHOD_CODES.VIETQR } = req.body;
+  const { planId, billingCycle = BILLING_CYCLES.MONTHLY, paymentMethod } = req.body;
+
+  if (!paymentMethod || !String(paymentMethod).trim()) {
+    throw new AppError('Phương thức thanh toán là bắt buộc.', 400, 'VALIDATION_ERROR');
+  }
+
   const normalizedPaymentMethod = String(paymentMethod).trim().toUpperCase();
+
+  // Kiểm tra sự tồn tại và trạng thái hoạt động của Phương thức thanh toán
+  const targetPaymentMethod = await prisma.paymentMethod.findUnique({
+    where: { code: normalizedPaymentMethod }
+  });
+
+  if (!targetPaymentMethod) {
+    throw new AppError('Phương thức thanh toán không tồn tại trong hệ thống.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!targetPaymentMethod.isActive) {
+    throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng. Vui lòng chọn phương thức khác.', 400, 'VALIDATION_ERROR');
+  }
 
   const parsedPlanId = parseInt(planId, 10);
   if (isNaN(parsedPlanId)) {
