@@ -179,7 +179,6 @@ model PaymentAccount {
   accountHolder       String               @map("account_holder") @db.VarChar(100)
   qrCodeUrl           String?              @map("qr_code_url") @db.VarChar(500)
   isDefault           Boolean              @default(false) @map("is_default")
-  isActive            Boolean              @default(true) @map("is_active")
   note                String?              @db.Text
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")

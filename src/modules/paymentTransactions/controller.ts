@@ -59,14 +59,14 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
 
   // 2. Tìm tài khoản ngân hàng nhận tiền mặc định của hệ thống
   let paymentAccount = await prisma.paymentAccount.findFirst({
-    where: { isDefault: true, isActive: true },
+    where: { isDefault: true },
     include: { bank: true }
   });
 
   if (!paymentAccount) {
     paymentAccount = await prisma.paymentAccount.findFirst({
-      where: { isActive: true },
-      include: { bank: true }
+      include: { bank: true },
+      orderBy: { createdAt: 'desc' }
     });
   }
 

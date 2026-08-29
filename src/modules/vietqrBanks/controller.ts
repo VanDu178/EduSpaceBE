@@ -169,11 +169,6 @@ export const toggleVietqrBankStatus = asyncHandler(async (req: Request, res: Res
     if (activePaymentAccounts.length > 0) {
       const defaultAccount = activePaymentAccounts.find((acc: { isDefault: boolean; accountNo: string; accountHolder: string }) => acc.isDefault);
       let errorMessage = `Không thể vô hiệu hóa ngân hàng "${existingBank.shortName}" vì đang có ${activePaymentAccounts.length} tài khoản thanh toán đang hoạt động liên kết với ngân hàng này.`;
-      if (defaultAccount) {
-        errorMessage += ` (Bao gồm tài khoản mặc định số ${defaultAccount.accountNo} - ${defaultAccount.accountHolder}).`;
-      }
-      errorMessage += ` Vui lòng tắt hoặc thay đổi ngân hàng cho các tài khoản thanh toán này trước.`;
-
       throw new AppError(errorMessage, 400, 'BANK_IN_USE');
     }
   }
