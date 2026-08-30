@@ -129,6 +129,40 @@ export function extractStoragePath(publicUrl: string): string | null {
   }
 }
 
+/**
+ * Xóa danh sách các file ảnh minh chứng trên Supabase Storage dựa trên danh sách Public URLs.
+ * Giúp tự động dọn dẹp rác khi xóa hoặc cập nhật UserSubscription.
+ */
+export async function cleanupProofImages(urls: (string | null | undefined)[] | null | undefined): Promise<number> {
+  if (!urls || !Array.isArray(urls) || urls.length === 0) return 0;
+
+  const validPaths: string[] = [];
+  for (const url of urls) {
+    if (url && typeof url === 'string') {
+      const storagePath = extractStoragePath(url);
+      if (storagePath) {
+        validPaths.push(storagePath);
+      }
+    }
+  }
+
+  if (validPaths.length === 0) return 0;
+
+  let deletedCount = 0;
+  for (const path of validPaths) {
+    const success = await deleteFromSupabase(path);
+    if (success) {
+      deletedCount++;
+    }
+  }
+
+  if (deletedCount > 0) {
+    console.log(`[Storage Cleanup] Đã tự động giải phóng ${deletedCount} file ảnh rác trên Supabase Storage.`);
+  }
+
+  return deletedCount;
+}
+
 
 function getExtensionFromMime(mimeType: string): string {
   const mimeMap: Record<string, string> = {

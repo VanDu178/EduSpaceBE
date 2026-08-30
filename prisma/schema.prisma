@@ -36,6 +36,7 @@ model User {
   paymentTransactions PaymentTransaction[]
   approvedTransactions PaymentTransaction[] @relation("AdminApprovedTransactions")
   refunds             PaymentRefund[]      @relation("AdminRefunds")
+  createdSubscriptions UserSubscription[]  @relation("AdminCreatedSubscriptions")
 
   @@map("users")
 }
@@ -148,26 +149,35 @@ model MembershipPlanFeature {
   @@map("membership_plan_features")
 }
 
-model UserSubscription {
-  id            Int                @id @default(autoincrement())
-  code          String             @unique @db.VarChar(50)
-  userId        Int                @map("user_id")
-  planId        Int                @map("plan_id")
-  billingCycle  BillingCycle       @default(monthly) @map("billing_cycle")
-  startDate     DateTime           @map("start_date")
-  endDate       DateTime           @map("end_date")
-  status        SubscriptionStatus @default(active)
-  pricePaid     Decimal            @map("price_paid") @db.Decimal(12, 2)
-  paymentMethod String?            @map("payment_method") @db.VarChar(50)
-  paymentRef    String?            @map("payment_ref") @db.VarChar(100)
-  autoRenew     Boolean            @default(false) @map("auto_renew")
-  cancelledAt   DateTime?          @map("cancelled_at")
-  cancelReason  String?            @map("cancel_reason") @db.VarChar(255)
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
+enum SubscriptionCreatedType {
+  system
+  admin
+}
 
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan          MembershipPlan     @relation(fields: [planId], references: [id])
+model UserSubscription {
+  id            Int                     @id @default(autoincrement())
+  code          String                  @unique @db.VarChar(50)
+  userId        Int                     @map("user_id")
+  planId        Int                     @map("plan_id")
+  billingCycle  BillingCycle            @default(monthly) @map("billing_cycle")
+  startDate     DateTime                @map("start_date")
+  endDate       DateTime                @map("end_date")
+  status        SubscriptionStatus      @default(active)
+  pricePaid     Decimal                 @map("price_paid") @db.Decimal(12, 2)
+  paymentMethod String?                 @map("payment_method") @db.VarChar(50)
+  paymentRef    String?                 @map("payment_ref") @db.VarChar(100)
+  cancelledAt   DateTime?               @map("cancelled_at")
+  cancelReason  String?                 @map("cancel_reason") @db.VarChar(255)
+  createdType   SubscriptionCreatedType @default(system) @map("created_type")
+  createdBy     Int?                    @map("created_by")
+  notes         String?                 @db.Text
+  proofUrls     Json?                   @map("proof_urls")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          MembershipPlan          @relation(fields: [planId], references: [id])
+  createdByUser User?                   @relation("AdminCreatedSubscriptions", fields: [createdBy], references: [id], onDelete: SetNull)
 
   @@map("user_subscriptions")
 }
@@ -229,6 +239,7 @@ enum RefundStatus {
 model PaymentTransaction {
   id               Int                      @id @default(autoincrement())
   code             String                   @unique @db.VarChar(50)
+  orderCode        String?                  @map("order_code") @db.VarChar(50)
   userId           Int                      @map("user_id")
   planId           Int                      @map("plan_id")
   paymentAccountId Int?                     @map("payment_account_id")

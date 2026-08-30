@@ -4,7 +4,8 @@ import {
   getMySubscriptions,
   getSubscriptionById,
   createSubscription,
-  updateSubscriptionStatus
+  updateSubscriptionStatus,
+  deleteSubscription
 } from './controller';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { adminMiddleware } from '../../middlewares/adminMiddleware';
@@ -26,6 +27,7 @@ router.post('/', createSubscription as any);
 // Các Route dành riêng cho Admin
 router.get('/', adminMiddleware as any, getSubscriptions as any);
 router.patch('/:id/status', adminMiddleware as any, updateSubscriptionStatus as any);
-
+router.delete('/:id', adminMiddleware as any, deleteSubscription as any);
 
 export default router;
+

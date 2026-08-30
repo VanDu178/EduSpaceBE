@@ -45,10 +45,13 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   const defaultVietQrUrl = `https://img.vietqr.io/image/${paymentAccount.bankCode}-${paymentAccount.accountNo}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(paymentAccount.accountHolder)}`;
   let qrCodeUrl = defaultVietQrUrl;
 
+  let createdOrderCode: string | null = null;
+
   // Ưu tiên gọi PayOS API để tạo mã VietQR động nhận Webhook tự động
   if (process.env.PAYOS_CLIENT_ID && process.env.PAYOS_API_KEY) {
     try {
       const numericOrderCode = Number(String(Date.now()).slice(-8) + Math.floor(100 + Math.random() * 900));
+      createdOrderCode = String(numericOrderCode);
       const clientUrl = process.env.CLIENT_FE_URL;
 
       const paymentLinkData = {
@@ -76,14 +79,15 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
     }
   }
 
-  // 4. Thời gian đếm ngược hết hạn (15 phút)
-  const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+  // 4. Thời gian đếm ngược hết hạn (24 giờ)
+  const expiredAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 
   // 7. Lưu đơn hàng vào DB
   const transaction = await prisma.paymentTransaction.create({
     data: {
       code,
+      orderCode: createdOrderCode,
       userId,
       planId: plan.id,
       paymentAccountId: paymentAccount.id,
@@ -144,6 +148,47 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
     });
   }
 
+  // 3. Logic Real-time Live Sync (Lớp 1): Nếu đơn đang PENDING hoặc PARTIALLY_PAID, chủ động query PayOS SDK để kiểm tra dòng tiền thực tế
+  if (
+    (transaction.status === TRANSACTION_STATUS.PENDING || transaction.status === TRANSACTION_STATUS.PARTIALLY_PAID) &&
+    process.env.PAYOS_CLIENT_ID &&
+    process.env.PAYOS_API_KEY
+  ) {
+    const targetOrderCode = (transaction as any).orderCode;
+    if (targetOrderCode) {
+      try {
+        const payosInfo = await payos.paymentRequests.get(Number(targetOrderCode));
+        if (payosInfo) {
+          const payosAmountPaid = Number(payosInfo.amountPaid || 0);
+          const orderAmount = Number(transaction.amount);
+
+          if (payosAmountPaid >= orderAmount) {
+            // Khách hàng đã chuyển ĐỦ hoặc THỪA tiền -> Duyệt đơn và kích hoạt gói tức thì!
+            const { transaction: fulfilledTx } = await fulfillPaymentTransaction({
+              txId: transaction.id,
+              paidAmount: payosAmountPaid,
+              approvalType: 'auto',
+              notes: 'Duyệt & kích hoạt gói tức thì qua PayOS Live Sync API'
+            });
+            transaction = fulfilledTx as any;
+          } else if (payosAmountPaid > Number(transaction.paidAmount || 0)) {
+            // Khách hàng đã chuyển THIẾU tiền -> Ghi nhận số tiền nạp tích lũy
+            const incomingAmount = payosAmountPaid - Number(transaction.paidAmount || 0);
+            const { transaction: partialTx } = await processPartialPaymentTransaction({
+              txId: transaction.id,
+              incomingAmount,
+              approvalType: 'auto',
+              notes: 'Ghi nhận số tiền nạp thiếu tức thì qua PayOS Live Sync API'
+            });
+            transaction = partialTx as any;
+          }
+        }
+      } catch (payosErr: any) {
+        console.warn(`[PayOS Live Sync] Không thể kiểm tra đơn #${transaction.code} (orderCode: ${targetOrderCode}):`, payosErr.message || payosErr);
+      }
+    }
+  }
+
   const amount = Number(transaction.amount);
   const paidAmount = Number(transaction.paidAmount);
   const overpaidAmount = Math.max(0, paidAmount - amount);
@@ -162,7 +207,7 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
       message = `Đã nhận ${paidAmount.toLocaleString('vi-VN')} đ / Cần ${amount.toLocaleString('vi-VN')} đ. Còn thiếu ${remainingAmount.toLocaleString('vi-VN')} đ.`;
       break;
     case TRANSACTION_STATUS.EXPIRED:
-      message = 'Giao dịch đã hết thời hạn thanh toán (15 phút). Vui lòng tạo giao dịch mới.';
+      message = 'Giao dịch đã hết thời hạn thanh toán (24 giờ). Vui lòng tạo giao dịch mới.';
       break;
     case TRANSACTION_STATUS.CANCELLED:
       message = 'Giao dịch đã bị hủy. Vui lòng tạo giao dịch mới hoặc liên hệ bộ phận CSKH.';
@@ -239,35 +284,39 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
   const checksumKey = process.env.PAYOS_CHECKSUM_KEY;
   const webhookSecret = process.env.WEBHOOK_PAYOS_SECRET;
 
-  // if (checksumKey && body.signature) {
-  //   try {
-  //     verifiedData = await payos.webhooks.verify(body);
-  //   } catch (err: any) {
-  //     const dataToVerify = (body.data && typeof body.data === 'object') ? body.data : body;
-  //     const sortedKeys = Object.keys(dataToVerify).sort();
-  //     const signData = sortedKeys
-  //       .filter((key) => dataToVerify[key] !== undefined && dataToVerify[key] !== null)
-  //       .map((key) => `${key}=${dataToVerify[key]}`)
-  //       .join('&');
+  if (checksumKey && body.signature) {
+    try {
+      if (typeof (payos as any).verifyPaymentWebhookData === 'function') {
+        verifiedData = (payos as any).verifyPaymentWebhookData(body);
+      } else if (typeof (payos as any).webhooks?.verify === 'function') {
+        verifiedData = await (payos as any).webhooks.verify(body);
+      }
+    } catch (err: any) {
+      const dataToVerify = (body.data && typeof body.data === 'object') ? body.data : body;
+      const sortedKeys = Object.keys(dataToVerify).sort();
+      const signData = sortedKeys
+        .filter((key) => dataToVerify[key] !== undefined && dataToVerify[key] !== null)
+        .map((key) => `${key}=${dataToVerify[key]}`)
+        .join('&');
 
-  //     const calculatedSignature = crypto
-  //       .createHmac('sha256', checksumKey)
-  //       .update(signData)
-  //       .digest('hex');
+      const calculatedSignature = crypto
+        .createHmac('sha256', checksumKey)
+        .update(signData)
+        .digest('hex');
 
-  //     if (calculatedSignature !== body.signature) {
-  //       throw new AppError('Chữ ký Webhook PayOS không hợp lệ', 401, 'UNAUTHORIZED');
-  //     }
-  //   }
-  // } else if (webhookSecret) {
-  //   const authHeader = req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-payos-signature'];
-  //   const token = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-  //   const bearerToken = token?.replace(/^Bearer\s+/i, '');
+      if (calculatedSignature !== body.signature) {
+        throw new AppError('Chữ ký Webhook PayOS không hợp lệ', 401, 'UNAUTHORIZED');
+      }
+    }
+  } else if (webhookSecret) {
+    const authHeader = req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-payos-signature'];
+    const token = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const bearerToken = token?.replace(/^Bearer\s+/i, '');
 
-  //   if (!token || (token !== webhookSecret && bearerToken !== webhookSecret)) {
-  //     throw new AppError('Xác thực Webhook không hợp lệ', 401, 'UNAUTHORIZED');
-  //   }
-  // }
+    if (!token || (token !== webhookSecret && bearerToken !== webhookSecret)) {
+      throw new AppError('Xác thực Webhook không hợp lệ', 401, 'UNAUTHORIZED');
+    }
+  }
 
   // 2. Kiểm tra trạng thái giao dịch PayOS (code == "00" hoặc success == true)
   if (body.code && body.code !== '00' && body.success === false) {

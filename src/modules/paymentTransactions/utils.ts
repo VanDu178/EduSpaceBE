@@ -62,6 +62,19 @@ export const fulfillPaymentTransaction = async ({
     };
   }
 
+  // Nếu đơn hàng đã EXPIRED hoặc CANCELLED hoặc quá thời gian expiredAt
+  const isTxExpired = transaction.status === TRANSACTION_STATUS.EXPIRED || Boolean(transaction.expiredAt && new Date(transaction.expiredAt) < new Date());
+  if (isTxExpired || transaction.status === TRANSACTION_STATUS.CANCELLED) {
+    if (approvalType === 'manual') {
+      throw new AppError('Giao dịch đã hết thời hạn thanh toán hoặc bị hủy. Không thể duyệt!', 400, 'TRANSACTION_EXPIRED');
+    }
+    return {
+      transaction,
+      alreadyCompleted: true,
+      blockedReason: 'EXPIRED_OR_CANCELLED'
+    };
+  }
+
   // Tính số tiền đã nạp thực tế
   const actualPaidAmount = paidAmount !== undefined
     ? paidAmount
@@ -135,7 +148,8 @@ export const fulfillPaymentTransaction = async ({
       status: 'active',
       pricePaid: transaction.amount,
       paymentMethod: transaction.paymentMethod || PAYMENT_METHOD_CODES.VIETQR,
-      paymentRef: updatedTransaction.paymentRef
+      paymentRef: updatedTransaction.paymentRef,
+      createdType: 'system'
     }
   });
 
@@ -178,6 +192,15 @@ export const processPartialPaymentTransaction = async ({
   }
 
   if (transaction.status === TRANSACTION_STATUS.COMPLETED || transaction.status === TRANSACTION_STATUS.OVERPAID) {
+    return {
+      transaction,
+      alreadyCompleted: true,
+      status: transaction.status
+    };
+  }
+
+  // Nếu đơn đã EXPIRED hoặc CANCELLED -> Giữ nguyên không xử lý
+  if (transaction.status === TRANSACTION_STATUS.EXPIRED || transaction.status === TRANSACTION_STATUS.CANCELLED) {
     return {
       transaction,
       alreadyCompleted: true,

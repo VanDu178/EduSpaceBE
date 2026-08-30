@@ -64,6 +64,15 @@ export const getSubscriptions = asyncHandler(async (req: Request, res: Response)
           avatarUrl: true
         }
       },
+      createdByUser: {
+        select: {
+          id: true,
+          code: true,
+          email: true,
+          name: true,
+          avatarUrl: true
+        }
+      },
       plan: {
         select: {
           id: true,
@@ -178,7 +187,10 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
     paymentMethod,
     paymentRef,
     status = 'active',
-    autoRenew = false
+    notes,
+    proofUrls,
+    startDate: customStartDate,
+    endDate: customEndDate
   } = req.body;
 
   // Xác định người dùng nhận gói
@@ -230,19 +242,29 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
   }
 
   // Tính toán thời gian bắt đầu và hết hạn
-  const startDate = new Date();
-  const endDate = new Date(startDate);
+  const startDate = customStartDate ? new Date(customStartDate) : new Date();
+  const endDate = customEndDate ? new Date(customEndDate) : new Date(startDate);
 
-  if (billingCycle === 'yearly') {
-    endDate.setFullYear(endDate.getFullYear() + 1);
-  } else {
-    endDate.setMonth(endDate.getMonth() + 1);
+  if (!customEndDate) {
+    if (billingCycle === 'yearly') {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
   }
+
+  // Xác định nguồn tạo gói (admin cấp thủ công hoặc system tự động)
+  const isAdminCreated = req.user?.role === 'admin';
+  const createdType = isAdminCreated ? 'admin' : 'system';
+  const createdBy = isAdminCreated && req.user ? req.user.id : null;
+
+  // Xử lý danh sách ảnh minh chứng (tối đa 5 ảnh)
+  const safeProofUrls = Array.isArray(proofUrls) ? proofUrls.slice(0, 5) : null;
 
   // Xác định số tiền thanh toán dựa trên chu kỳ đã chọn
   const pricePaid = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
 
-  // Nếu tạo gói ở trạng thái 'active', tự động hủy/chuyển trạng thái gói active cũ của User (đảm bảo chỉ 1 gói active tại một thời điểm)
+  // Nếu tạo gói ở trạng thái 'active', tự động hủy/chuyển trạng thái gói active cũ của User
   if (status === 'active') {
     await prisma.userSubscription.updateMany({
       where: {
@@ -252,7 +274,7 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
       data: {
         status: 'cancelled',
         cancelledAt: new Date(),
-        cancelReason: 'Chuyển sang gói mới'
+        cancelReason: isAdminCreated ? 'Nâng cấp gói mới do Admin cấp' : 'Chuyển sang gói mới'
       }
     });
   }
@@ -268,9 +290,12 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
       endDate,
       status: status as any,
       pricePaid,
-      paymentMethod: paymentMethod ? String(paymentMethod).trim().toUpperCase() : null,
+      paymentMethod: paymentMethod ? String(paymentMethod).trim().toUpperCase() : (isAdminCreated ? 'ADMIN_ASSIGNED' : null),
       paymentRef: paymentRef ? String(paymentRef).trim() : null,
-      autoRenew: Boolean(autoRenew)
+      createdType,
+      createdBy,
+      notes: notes ? String(notes).trim() : null,
+      proofUrls: safeProofUrls as any
     }
   });
 
@@ -297,11 +322,12 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
 
 /**
  * Cập nhật trạng thái đơn đăng ký (Chỉ Admin duyệt/hủy/gia hạn).
+ * CHẶN: Các gói có createdType === 'system' (từ thanh toán tự động) KHÔNG ĐƯỢC phép sửa.
  */
 export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const subId = parseInt(id as string, 10);
-  const { status, cancelReason, endDate } = req.body;
+  const { status, cancelReason, endDate, notes, proofUrls } = req.body;
 
   if (isNaN(subId)) {
     throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
@@ -315,12 +341,16 @@ export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: R
     throw new AppError('Đơn đăng ký không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // BẢO VỆ DỮ LIỆU: Bản ghi do Hệ thống (system) tự động kích hoạt KHÔNG CHO PHÉP chỉnh sửa
+  if (existing.createdType === 'system') {
+    throw new AppError('Gói dịch vụ kích hoạt tự động từ hệ thống thanh toán không được phép chỉnh sửa', 403, 'FORBIDDEN');
+  }
+
   const updateData: any = {};
 
   if (status) {
     updateData.status = status;
 
-    // Nếu đổi sang active, hủy các gói active khác của cùng user đó
     if (status === 'active') {
       await prisma.userSubscription.updateMany({
         where: {
@@ -346,6 +376,21 @@ export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: R
     updateData.endDate = new Date(endDate);
   }
 
+  if (notes !== undefined) {
+    updateData.notes = notes ? String(notes).trim() : null;
+  }
+
+  // Dọn dẹp các ảnh bị gỡ bỏ khỏi Supabase Storage để chống rác
+  if (proofUrls !== undefined && Array.isArray(proofUrls)) {
+    const oldUrls: string[] = Array.isArray(existing.proofUrls) ? (existing.proofUrls as string[]) : [];
+    const removedUrls = oldUrls.filter(url => !proofUrls.includes(url));
+    if (removedUrls.length > 0) {
+      const { cleanupProofImages } = await import('../../utils/supabaseStorage');
+      await cleanupProofImages(removedUrls);
+    }
+    updateData.proofUrls = proofUrls.slice(0, 5);
+  }
+
   const updated = await prisma.userSubscription.update({
     where: { id: subId },
     data: updateData,
@@ -358,9 +403,57 @@ export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: R
           email: true,
           name: true
         }
+      },
+      createdByUser: {
+        select: {
+          id: true,
+          code: true,
+          email: true,
+          name: true
+        }
       }
     }
   });
 
   return sendSuccess(res, updated, 'Cập nhật trạng thái đăng ký thành công');
+});
+
+/**
+ * Xóa đơn đăng ký gói hội viên.
+ * CHẶN: Các gói do Hệ thống (system) tự động kích hoạt KHÔNG ĐƯỢC phép xóa.
+ * Chỉ áp dụng cho các gói do Admin cấp thủ công (createdType === 'admin').
+ */
+export const deleteSubscription = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const subId = parseInt(id as string, 10);
+
+  if (isNaN(subId)) {
+    throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  const existing = await prisma.userSubscription.findUnique({
+    where: { id: subId }
+  });
+
+  if (!existing) {
+    throw new AppError('Đơn đăng ký không tồn tại', 404, 'NOT_FOUND');
+  }
+
+  // BẢO VỆ DỮ LIỆU: Bản ghi do Hệ thống (system) tự động tạo KHÔNG CHO PHÉP xóa
+  if (existing.createdType === 'system') {
+    throw new AppError('Gói dịch vụ kích hoạt tự động từ hệ thống thanh toán không được phép xóa', 403, 'FORBIDDEN');
+  }
+
+  // Dọn dẹp toàn bộ file ảnh minh chứng trên Supabase Storage trước khi xóa khỏi DB
+  const oldUrls: string[] = Array.isArray(existing.proofUrls) ? (existing.proofUrls as string[]) : [];
+  if (oldUrls.length > 0) {
+    const { cleanupProofImages } = await import('../../utils/supabaseStorage');
+    await cleanupProofImages(oldUrls);
+  }
+
+  await prisma.userSubscription.delete({
+    where: { id: subId }
+  });
+
+  return sendSuccess(res, { deletedId: subId }, 'Xóa gói hội viên cấp thủ công thành công');
 });
