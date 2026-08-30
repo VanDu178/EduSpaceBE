@@ -11,6 +11,7 @@ import paymentAccountRoutes from '../modules/paymentAccounts/routes';
 import vietqrBankRoutes from '../modules/vietqrBanks/routes';
 import paymentTransactionRoutes from '../modules/paymentTransactions/routes';
 import paymentMethodRoutes from '../modules/paymentMethods/routes';
+import paymentRefundRoutes from '../modules/paymentRefunds/routes';
 
 const apiRouter = express.Router();
 
@@ -27,6 +28,7 @@ apiRouter.use('/payment-accounts', paymentAccountRoutes);
 apiRouter.use('/vietqr-banks', vietqrBankRoutes);
 apiRouter.use('/payment-transactions', paymentTransactionRoutes);
 apiRouter.use('/payment-methods', paymentMethodRoutes);
+apiRouter.use('/payment-refunds', paymentRefundRoutes);
 
 export default apiRouter;
 

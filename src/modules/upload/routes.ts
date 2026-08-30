@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { uploadSingleFile, uploadMultipleFiles } from './controller';
+import { uploadSingleFile, uploadMultipleFiles, deleteFile } from './controller';
 
 const uploadRoutes = express.Router();
 
@@ -17,5 +17,8 @@ uploadRoutes.post('/single', upload.single('file'), uploadSingleFile);
 
 // Route upload nhiều file (field key là 'files', tối đa 10 file 1 lần)
 uploadRoutes.post('/multiple', upload.array('files', 10), uploadMultipleFiles);
+
+// Route xóa file
+uploadRoutes.delete('/', deleteFile);
 
 export default uploadRoutes;

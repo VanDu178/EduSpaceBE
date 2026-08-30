@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import { AppError } from '../utils/appError';
 
 /**
@@ -15,6 +16,15 @@ export const errorHandler = (
   let errorCode = err.errorCode || 'INTERNAL_SERVER_ERROR';
   let errors = err.errors || null;
 
+  // Xử lý lỗi Zod Error toàn cục (nếu có ZodError văng ra trực tiếp)
+  if (err instanceof ZodError) {
+    const firstIssue = err.issues[0] as any;
+    statusCode = firstIssue?.params?.statusCode || 400;
+    errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
+    message = firstIssue?.message || 'Dữ liệu đầu vào không hợp lệ.';
+    (err as any).isOperational = true;
+  }
+
   // Log chi tiết lỗi hệ thống (không phải lỗi nghiệp vụ do người dùng nhập liệu)
   if (!err.isOperational) {
     console.error('--- UNHANDLED ERROR ---');
@@ -30,7 +40,7 @@ export const errorHandler = (
   if (err.code === 'P2002') {
     statusCode = 400;
     errorCode = 'DUPLICATE_RESOURCE';
-    
+
     const target = err.meta?.target;
     if (typeof target === 'string') {
       const field = target.split('_')[1] || target;

@@ -47,3 +47,30 @@ export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Respon
 
   return sendSuccess(res, results, `Đã tải lên thành công ${results.length} file!`, 201);
 });
+
+/**
+ * Controller xử lý xóa file khỏi Supabase Storage
+ * Route: DELETE /api/v1/upload
+ */
+export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
+  const urlOrPath = req.body?.url || req.body?.path || (req.query?.url as string);
+
+  if (!urlOrPath) {
+    throw new AppError('Vui lòng cung cấp đường dẫn tệp cần xóa!', 400);
+  }
+
+  const { extractStoragePath, deleteFromSupabase } = await import('../../utils/supabaseStorage');
+  const filePath = extractStoragePath(urlOrPath);
+
+  if (!filePath) {
+    throw new AppError('Đường dẫn tệp không hợp lệ!', 400);
+  }
+
+  const success = await deleteFromSupabase(filePath);
+  if (!success) {
+    throw new AppError('Xóa tệp thất bại!', 500);
+  }
+
+  return sendSuccess(res, { path: filePath }, 'Xóa tệp khỏi hệ thống thành công!');
+});
+

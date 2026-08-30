@@ -236,7 +236,7 @@ export function generateInvoicePdfBuffer(data: InvoicePdfData): Promise<Buffer> 
       { label: 'Hạn thanh toán', val: formatDate(data.expiredAt) },
       { label: 'Ngày cung cấp', val: formatDate(data.createdAt) },
       { label: 'Ngày thanh toán', val: formatDate(data.paidAt) },
-      { label: 'Đã thanh toán', val: data.status === 'completed' ? formatMoney(Number(data.amount)) : '0 VNĐ' },
+      { label: 'Đã thanh toán', val: (data.status === 'completed' || data.status === 'overpaid') ? formatMoney(Number(data.amount)) : '0 VNĐ' },
     ];
 
     orderMeta.forEach((item) => {
@@ -318,7 +318,7 @@ export function generateInvoicePdfBuffer(data: InvoicePdfData): Promise<Buffer> 
       { label: 'Tổng cộng thanh toán', val: formatMoney(Number(data.amount)), bold: true },
       {
         label: 'Số tiền còn phải trả',
-        val: data.status === 'completed' ? '0 VNĐ' : formatMoney(Number(data.amount)),
+        val: (data.status === 'completed' || data.status === 'overpaid') ? '0 VNĐ' : formatMoney(Number(data.amount)),
         bold: true,
       },
     ];
