@@ -48,13 +48,5 @@ export const checkUserFeatureAccess = async (
     };
   }
 
-  if (planFeature.disabledAt && new Date() >= new Date(planFeature.disabledAt)) {
-    return {
-      hasAccess: false,
-      reason: 'FEATURE_EXPIRED_GRACE_PERIOD',
-      message: 'Tính năng này đã chính thức ngưng hỗ trợ sau thời gian thông báo.'
-    };
-  }
-
   return { hasAccess: true };
 };

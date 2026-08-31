@@ -4,7 +4,6 @@ import { AppError } from '../../utils/appError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
 import { generatePlanCode } from '../../utils/codeGenerator';
-import { sendBatchFeatureSunsetNoticeEmail } from '../../utils/emailService';
 
 /**
  * Lấy danh sách gói hội viên kèm danh sách các tính năng.
@@ -253,7 +252,14 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
   if (popularBadge !== undefined) updateData.popularBadge = popularBadge ? popularBadge.trim() : null;
   if (buttonText !== undefined) updateData.buttonText = buttonText ? buttonText.trim() : null;
   if (tierLevel !== undefined) updateData.tierLevel = Number(tierLevel);
-  if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+  if (isActive !== undefined && Boolean(isActive) !== existing.isActive) {
+    const subCount = await prisma.userSubscription.count({ where: { planId } });
+    const txCount = await prisma.paymentTransaction.count({ where: { planId } });
+    if (subCount > 0 || txCount > 0) {
+      throw new AppError('Gói hội viên đã có người đăng ký hoặc có lịch sử giao dịch. Không thể chuyển đổi trạng thái gói này.', 400, 'VALIDATION_ERROR');
+    }
+    updateData.isActive = Boolean(isActive);
+  }
 
   // Cập nhật thông tin gói
   await prisma.membershipPlan.update({
@@ -263,89 +269,43 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
 
   // Cập nhật liên kết planFeatures nếu được truyền lên
   if (Array.isArray(planFeatures)) {
+    const subCount = await prisma.userSubscription.count({ where: { planId } });
+    const txCount = await prisma.paymentTransaction.count({ where: { planId } });
+    const isPlanUsed = subCount > 0 || txCount > 0;
+
     const oldPlanFeatures = existing.planFeatures || [];
 
-    // 1. So sánh Diff: Lọc danh sách các tính năng MỚI BỊ ĐIỀU CHỈNH / TẮT trong lần submit này
-    const newlyDisabledItems: { featureName: string; disabledAt?: string | Date | null; compensateDays: number; notifyReason?: string }[] = [];
-
-    for (const pf of planFeatures) {
-      const oldPf = oldPlanFeatures.find((item: { featureId: number; isAvailable: boolean; disabledAt: Date | null }) => item.featureId === Number(pf.featureId));
-      
-      const isCurrentlyDisabled = !pf.isAvailable || Boolean(pf.disabledAt) || (pf.compensateDays && Number(pf.compensateDays) > 0) || Boolean(pf.notifyReason);
-      const wasPreviouslyActive = !oldPf || (oldPf.isAvailable && !oldPf.disabledAt);
-
-      if (isCurrentlyDisabled && wasPreviouslyActive) {
-        const featInfo = await prisma.feature.findUnique({
-          where: { id: Number(pf.featureId) }
-        });
-
-        newlyDisabledItems.push({
-          featureName: featInfo?.name || 'Tính năng',
-          disabledAt: pf.disabledAt || null,
-          compensateDays: pf.compensateDays ? Number(pf.compensateDays) : 0,
-          notifyReason: pf.notifyReason || ''
-        });
-      }
-    }
-
-    // Nếu có tính năng mới bị điều chỉnh/tắt
-    if (newlyDisabledItems.length > 0) {
-      // Lấy maxCompensateDays từ tất cả các tính năng mới bị tắt (ví dụ max(5, 10) = 10 ngày)
-      const maxCompensateDays = Math.max(0, ...newlyDisabledItems.map((item) => item.compensateDays));
-      const latestNotifyReason = newlyDisabledItems.find((item) => item.notifyReason)?.notifyReason || '';
-
-      const activeSubs = await prisma.userSubscription.findMany({
-        where: {
-          planId,
-          endDate: { gte: new Date() }
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          }
-        }
+    // Nếu gói đã từng được sử dụng, KHÔNG CHO TẮT tính năng đang khả dụng (vẫn cho phép bật thêm tính năng)
+    if (isPlanUsed) {
+      const hasDisabledExistingFeature = planFeatures.some((pf: { featureId: number; isAvailable: boolean }) => {
+        const oldPf = oldPlanFeatures.find((item) => item.featureId === Number(pf.featureId));
+        const oldAvailable = oldPf ? oldPf.isAvailable : false;
+        const newAvailable = Boolean(pf.isAvailable);
+        // Chỉ ném lỗi nếu tính năng trước đó ĐANG BẬT (oldAvailable = true) nhưng nay lại BỊ TẮT (newAvailable = false)
+        return oldAvailable && !newAvailable;
       });
 
-      for (const sub of activeSubs) {
-        // Cộng đền bù số ngày lớn nhất một lần duy nhất
-        if (maxCompensateDays > 0) {
-          const currentEnd = new Date(sub.endDate);
-          currentEnd.setDate(currentEnd.getDate() + maxCompensateDays);
-          await prisma.userSubscription.update({
-            where: { id: sub.id },
-            data: { endDate: currentEnd }
-          });
-        }
-
-        // Gửi DUY NHẤT 1 Email tổng hợp danh sách các tính năng mới bị tắt cho từng subscriber
-        if (sub.user?.email) {
-          sendBatchFeatureSunsetNoticeEmail({
-            to: sub.user.email,
-            userName: sub.user.name,
-            planName: existing.name,
-            disabledFeatures: newlyDisabledItems,
-            maxCompensateDays,
-            notifyReason: latestNotifyReason
-          }).catch((err) => console.error(`Lỗi gửi mail tổng hợp cho ${sub.user.email}:`, err));
-        }
+      if (hasDisabledExistingFeature) {
+        throw new AppError(
+          'Gói hội viên đã có người đăng ký hoặc có lịch sử giao dịch. Không thể tắt tính năng đang khả dụng của gói này.',
+          400,
+          'VALIDATION_ERROR'
+        );
       }
     }
 
+    // Nếu chưa sử dụng hoặc không có thay đổi trạng thái, thực hiện cập nhật lại danh sách tính năng
     await prisma.membershipPlanFeature.deleteMany({
       where: { planId }
     });
 
     if (planFeatures.length > 0) {
       await prisma.membershipPlanFeature.createMany({
-        data: planFeatures.map((pf: { featureId: number; isAvailable: boolean; disabledAt?: string | Date | null }) => ({
+        data: planFeatures.map((pf: { featureId: number; isAvailable: boolean }) => ({
           planId,
           featureId: Number(pf.featureId),
           isAvailable: Boolean(pf.isAvailable),
-          disabledAt: pf.disabledAt ? new Date(pf.disabledAt) : null
+          disabledAt: null
         }))
       });
     }
