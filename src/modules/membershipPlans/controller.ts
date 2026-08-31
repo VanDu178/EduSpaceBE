@@ -33,7 +33,6 @@ export const getMembershipPlans = asyncHandler(async (req: Request, res: Respons
         select: {
           subscriptions: {
             where: {
-              status: 'active' as const,
               endDate: { gte: new Date() }
             }
           }
@@ -75,7 +74,6 @@ export const getMembershipPlanById = asyncHandler(async (req: Request, res: Resp
             select: {
               subscriptions: {
                 where: {
-                  status: 'active' as const,
                   endDate: { gte: new Date() }
                 }
               }
@@ -95,7 +93,6 @@ export const getMembershipPlanById = asyncHandler(async (req: Request, res: Resp
             select: {
               subscriptions: {
                 where: {
-                  status: 'active' as const,
                   endDate: { gte: new Date() }
                 }
               }
@@ -300,7 +297,6 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
       const activeSubs = await prisma.userSubscription.findMany({
         where: {
           planId,
-          status: 'active' as const,
           endDate: { gte: new Date() }
         },
         include: {
@@ -367,7 +363,6 @@ export const updateMembershipPlan = asyncHandler(async (req: Request, res: Respo
         select: {
           subscriptions: {
             where: {
-              status: 'active' as const,
               endDate: { gte: new Date() }
             }
           }

@@ -26,6 +26,7 @@ router.post('/', createSubscription as any);
 
 // Các Route dành riêng cho Admin
 router.get('/', adminMiddleware as any, getSubscriptions as any);
+router.patch('/:id', adminMiddleware as any, updateSubscriptionStatus as any);
 router.patch('/:id/status', adminMiddleware as any, updateSubscriptionStatus as any);
 router.delete('/:id', adminMiddleware as any, deleteSubscription as any);
 

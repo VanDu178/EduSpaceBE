@@ -5,6 +5,7 @@ import { verifyAccessToken } from '../utils/authHelper';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import type { Request } from 'express';
+import { getStartOfToday } from '../utils/dateHelpers';
 
 export interface AuthenticatedRequest extends Request {
   user?: Omit<User, 'password'> & {
@@ -30,8 +31,7 @@ export const getUserWithSubscription = async (userId: number) => {
   const activeSub = await prisma.userSubscription.findFirst({
     where: {
       userId,
-      status: 'active',
-      endDate: { gte: new Date() }
+      endDate: { gte: getStartOfToday() }
     },
     include: {
       plan: true
@@ -54,7 +54,7 @@ export const getUserWithSubscription = async (userId: number) => {
           billingCycle: activeSub.billingCycle,
           startDate: activeSub.startDate,
           endDate: activeSub.endDate,
-          status: activeSub.status,
+          status: 'active',
           plan: {
             id: activeSub.plan.id,
             code: activeSub.plan.code,

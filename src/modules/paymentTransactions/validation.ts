@@ -2,6 +2,7 @@ import prisma from '../../config/db';
 import { AppError } from '../../utils/appError';
 import { BILLING_CYCLES } from '../userSubscriptions/constants';
 import { TRANSACTION_STATUS } from './constants';
+import { getStartOfToday } from '../../utils/dateHelpers';
 import {
   createTransactionSchema,
   getTransactionStatusSchema,
@@ -73,7 +74,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
 
   // 3. Kiểm tra cấp độ gói người dùng hiện tại (nếu đang có gói active)
   const activeSub = await prisma.userSubscription.findFirst({
-    where: { userId, status: 'active' },
+    where: { userId, endDate: { gte: getStartOfToday() } },
     include: { plan: true },
   });
 
@@ -197,8 +198,11 @@ export async function validateCancelTransactionData(
     throw new AppError('Bạn không có quyền thao tác trên giao dịch này', 403, 'FORBIDDEN');
   }
 
-  if (transaction.status !== TRANSACTION_STATUS.PENDING) {
-    throw new AppError('Chỉ có thể hủy giao dịch đang ở trạng thái chờ', 400, 'VALIDATION_ERROR');
+  if (
+    transaction.status !== TRANSACTION_STATUS.PENDING &&
+    transaction.status !== TRANSACTION_STATUS.PARTIALLY_PAID
+  ) {
+    throw new AppError('Chỉ có thể hủy giao dịch đang ở trạng thái chờ hoặc đã thanh toán một phần', 400, 'VALIDATION_ERROR');
   }
 
   return transaction;

@@ -1,4 +1,5 @@
 import prisma from '../config/db';
+import { getStartOfToday } from './dateHelpers';
 
 /**
  * Kiểm tra xem người dùng có quyền sử dụng một tính năng cụ thể dựa trên gói hội viên đang hoạt động của họ hay không.
@@ -12,8 +13,7 @@ export const checkUserFeatureAccess = async (
   const activeSub = await prisma.userSubscription.findFirst({
     where: {
       userId,
-      status: 'active',
-      endDate: { gte: new Date() }
+      endDate: { gte: getStartOfToday() }
     },
     include: {
       plan: {

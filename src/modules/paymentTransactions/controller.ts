@@ -5,6 +5,7 @@ import { AppError } from '../../utils/appError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
 import { generatePaymentTransactionCode } from '../../utils/codeGenerator';
+import { getStartOfToday } from '../../utils/dateHelpers';
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
 import { BILLING_CYCLES } from '../userSubscriptions/constants';
 import { TRANSACTION_STATUS } from './constants';
@@ -218,6 +219,11 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
       break;
   }
 
+  let responseQrCodeUrl = transaction.qrCodeUrl;
+  if (transaction.status === TRANSACTION_STATUS.PARTIALLY_PAID && responseQrCodeUrl) {
+    responseQrCodeUrl = responseQrCodeUrl.replace(/amount=\d+/, `amount=${remainingAmount}`);
+  }
+
   return sendSuccess(res, {
     id: transaction.id,
     code: transaction.code,
@@ -229,7 +235,7 @@ export const getTransactionStatus = asyncHandler(async (req: Request, res: Respo
     totalRefundedAmount,
     notes: transaction.notes,
     transferContent: transaction.transferContent,
-    qrCodeUrl: transaction.qrCodeUrl,
+    qrCodeUrl: responseQrCodeUrl,
     expiredAt: transaction.expiredAt,
     paidAt: transaction.paidAt,
     paymentAccount: transaction.paymentAccount,
@@ -449,7 +455,7 @@ export const getTransactions = asyncHandler(async (req: Request, res: Response) 
           name: true,
           avatarUrl: true,
           subscriptions: {
-            where: { status: 'active' },
+            where: { endDate: { gte: getStartOfToday() } },
             include: { plan: true }
           }
         }
@@ -530,7 +536,24 @@ export const getMyTransactions = asyncHandler(async (req: AuthenticatedRequest, 
     }
   });
 
-  return sendSuccess(res, transactions, 'Lấy lịch sử giao dịch thành công');
+  const mappedTransactions = transactions.map((t) => {
+    const amount = Number(t.amount);
+    const paidAmount = Number(t.paidAmount);
+    const remainingAmount = Math.max(0, amount - paidAmount);
+    let qrCodeUrl = t.qrCodeUrl;
+    if (t.status === TRANSACTION_STATUS.PARTIALLY_PAID && qrCodeUrl) {
+      qrCodeUrl = qrCodeUrl.replace(/amount=\d+/, `amount=${remainingAmount}`);
+    }
+    return {
+      ...t,
+      amount,
+      paidAmount,
+      remainingAmount,
+      qrCodeUrl,
+    };
+  });
+
+  return sendSuccess(res, mappedTransactions, 'Lấy lịch sử giao dịch thành công');
 });
 
 /**

@@ -4,6 +4,7 @@ import { TRANSACTION_STATUS, REFUND_STATUS } from './constants';
 import { BILLING_CYCLES } from '../userSubscriptions/constants';
 import { PAYMENT_METHOD_CODES } from '../paymentMethods/constants';
 import { generateSubscriptionCode } from '../../utils/codeGenerator';
+import { getStartOfToday, getYesterdayEndOfDay } from '../../utils/dateHelpers';
 import type { ApprovalType } from '@prisma/client';
 
 export interface FulfillPaymentOptions {
@@ -121,18 +122,14 @@ export const fulfillPaymentTransaction = async ({
     endDate.setMonth(endDate.getMonth() + 1);
   }
 
-  // Hủy các gói active cũ của User
+  // Tự động kết thúc thời hạn (chuyển endDate về ngày hôm qua) cho các gói cũ còn hạn của User
   await prisma.userSubscription.updateMany({
     where: {
       userId: transaction.userId,
-      status: 'active'
+      endDate: { gte: getStartOfToday() }
     },
     data: {
-      status: 'cancelled',
-      cancelledAt: new Date(),
-      cancelReason: approvalType === 'auto'
-        ? 'Nâng cấp gói mới qua Webhook tự động'
-        : 'Nâng cấp gói mới qua VietQR (Admin duyệt)'
+      endDate: getYesterdayEndOfDay()
     }
   });
 
@@ -145,7 +142,6 @@ export const fulfillPaymentTransaction = async ({
       billingCycle: transaction.billingCycle,
       startDate,
       endDate,
-      status: 'active',
       pricePaid: transaction.amount,
       paymentMethod: transaction.paymentMethod || PAYMENT_METHOD_CODES.VIETQR,
       paymentRef: updatedTransaction.paymentRef,

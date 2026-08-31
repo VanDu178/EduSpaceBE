@@ -87,13 +87,6 @@ model Blog {
   @@map("blogs")
 }
 
-enum SubscriptionStatus {
-  active
-  expired
-  cancelled
-  pending_payment @map("pending_payment")
-}
-
 enum BillingCycle {
   monthly
   yearly
@@ -162,12 +155,9 @@ model UserSubscription {
   billingCycle  BillingCycle            @default(monthly) @map("billing_cycle")
   startDate     DateTime                @map("start_date")
   endDate       DateTime                @map("end_date")
-  status        SubscriptionStatus      @default(active)
   pricePaid     Decimal                 @map("price_paid") @db.Decimal(12, 2)
   paymentMethod String?                 @map("payment_method") @db.VarChar(50)
   paymentRef    String?                 @map("payment_ref") @db.VarChar(100)
-  cancelledAt   DateTime?               @map("cancelled_at")
-  cancelReason  String?                 @map("cancel_reason") @db.VarChar(255)
   createdType   SubscriptionCreatedType @default(system) @map("created_type")
   createdBy     Int?                    @map("created_by")
   notes         String?                 @db.Text

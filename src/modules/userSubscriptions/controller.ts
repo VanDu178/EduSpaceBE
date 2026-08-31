@@ -4,6 +4,7 @@ import { AppError } from '../../utils/appError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
 import { generateSubscriptionCode } from '../../utils/codeGenerator';
+import { getStartOfToday, getYesterdayEndOfDay, isSubscriptionActive } from '../../utils/dateHelpers';
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
 
 /**
@@ -27,9 +28,14 @@ export const getSubscriptions = asyncHandler(async (req: Request, res: Response)
     }
   }
 
-  // Lọc theo trạng thái gói (active, expired, cancelled, pending_payment)
+  // Lọc theo trạng thái gói (active, expired) dựa theo endDate
   if (status && status !== 'all') {
-    whereClause.status = status as string;
+    const startOfToday = getStartOfToday();
+    if (status === 'active') {
+      whereClause.endDate = { gte: startOfToday };
+    } else if (status === 'expired') {
+      whereClause.endDate = { lt: startOfToday };
+    }
   }
 
   // Tìm kiếm theo từ khóa (Mã đơn đăng ký, Email người dùng, Tên người dùng)
@@ -86,10 +92,15 @@ export const getSubscriptions = asyncHandler(async (req: Request, res: Response)
     }
   });
 
+  const formattedItems = subscriptions.map(sub => ({
+    ...sub,
+    status: isSubscriptionActive(sub.endDate) ? 'active' : 'expired'
+  }));
+
   const totalPages = Math.ceil(totalItems / limit);
 
   return sendSuccess(res, {
-    items: subscriptions,
+    items: formattedItems,
     pagination: {
       currentPage: page,
       totalPages,
@@ -125,14 +136,23 @@ export const getMySubscriptions = asyncHandler(async (req: AuthenticatedRequest,
     }
   });
 
-  // Lấy gói đang có hiệu lực (active và chưa hết hạn)
-  const now = new Date();
-  const activeSubscription = subscriptions.find(
-    sub => sub.status === 'active' && new Date(sub.endDate) >= now
+  // Lấy gói đang có hiệu lực (chưa hết hạn theo ngày)
+  const activeSubscriptionRaw = subscriptions.find(
+    sub => isSubscriptionActive(sub.endDate)
   ) || null;
 
+  const formattedSubscriptions = subscriptions.map(sub => ({
+    ...sub,
+    status: isSubscriptionActive(sub.endDate) ? 'active' : 'expired'
+  }));
+
+  const activeSubscription = activeSubscriptionRaw ? {
+    ...activeSubscriptionRaw,
+    status: 'active' as const
+  } : null;
+
   return sendSuccess(res, {
-    subscriptions,
+    subscriptions: formattedSubscriptions,
     activeSubscription
   }, 'Lấy thông tin đăng ký cá nhân thành công');
 });
@@ -264,20 +284,16 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
   // Xác định số tiền thanh toán dựa trên chu kỳ đã chọn
   const pricePaid = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
 
-  // Nếu tạo gói ở trạng thái 'active', tự động hủy/chuyển trạng thái gói active cũ của User
-  if (status === 'active') {
-    await prisma.userSubscription.updateMany({
-      where: {
-        userId: targetUserId,
-        status: 'active'
-      },
-      data: {
-        status: 'cancelled',
-        cancelledAt: new Date(),
-        cancelReason: isAdminCreated ? 'Nâng cấp gói mới do Admin cấp' : 'Chuyển sang gói mới'
-      }
-    });
-  }
+  // Tự động kết thúc thời hạn (chuyển endDate về ngày hôm qua) cho các gói cũ còn hạn của User
+  await prisma.userSubscription.updateMany({
+    where: {
+      userId: targetUserId,
+      endDate: { gte: getStartOfToday() }
+    },
+    data: {
+      endDate: getYesterdayEndOfDay()
+    }
+  });
 
   // Bước 1: Tạo bản ghi với mã tạm
   const tempSub = await prisma.userSubscription.create({
@@ -288,7 +304,6 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
       billingCycle: billingCycle === 'yearly' ? 'yearly' : 'monthly',
       startDate,
       endDate,
-      status: status as any,
       pricePaid,
       paymentMethod: paymentMethod ? String(paymentMethod).trim().toUpperCase() : (isAdminCreated ? 'ADMIN_ASSIGNED' : null),
       paymentRef: paymentRef ? String(paymentRef).trim() : null,
@@ -327,14 +342,25 @@ export const createSubscription = asyncHandler(async (req: AuthenticatedRequest,
 export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const subId = parseInt(id as string, 10);
-  const { status, cancelReason, endDate, notes, proofUrls } = req.body;
+  const {
+    userId,
+    planId,
+    billingCycle,
+    status,
+    paymentMethod,
+    paymentRef,
+    endDate,
+    notes,
+    proofUrls
+  } = req.body;
 
   if (isNaN(subId)) {
     throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
   const existing = await prisma.userSubscription.findUnique({
-    where: { id: subId }
+    where: { id: subId },
+    include: { plan: true }
   });
 
   if (!existing) {
@@ -348,32 +374,91 @@ export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: R
 
   const updateData: any = {};
 
-  if (status) {
-    updateData.status = status;
-
-    if (status === 'active') {
-      await prisma.userSubscription.updateMany({
-        where: {
-          userId: existing.userId,
-          status: 'active',
-          id: { not: subId }
-        },
-        data: {
-          status: 'cancelled',
-          cancelledAt: new Date(),
-          cancelReason: 'Chuyển sang gói mới'
-        }
-      });
+  // Xử lý cập nhật Người dùng nhận gói (userId)
+  if (userId !== undefined && userId !== null) {
+    const parsedUserId = parseInt(userId, 10);
+    if (isNaN(parsedUserId)) {
+      throw new AppError('Người dùng không hợp lệ', 400, 'VALIDATION_ERROR');
     }
+    const user = await prisma.user.findUnique({
+      where: { id: parsedUserId }
+    });
+    if (!user) {
+      throw new AppError('Người dùng không tồn tại', 404, 'NOT_FOUND');
+    }
+    updateData.userId = parsedUserId;
+  }
 
-    if (status === 'cancelled') {
-      updateData.cancelledAt = new Date();
-      updateData.cancelReason = cancelReason ? String(cancelReason).trim() : 'Admin hủy gói';
+  // Xử lý cập nhật Gói hội viên
+  let planToUse = existing.plan;
+  if (planId !== undefined && planId !== null) {
+    const parsedPlanId = parseInt(planId, 10);
+    if (isNaN(parsedPlanId)) {
+      throw new AppError('Gói hội viên không hợp lệ', 400, 'VALIDATION_ERROR');
+    }
+    const plan = await prisma.membershipPlan.findUnique({
+      where: { id: parsedPlanId }
+    });
+    if (!plan) {
+      throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
+    }
+    updateData.planId = parsedPlanId;
+    planToUse = plan;
+  }
+
+  // Xử lý Chu kỳ thanh toán & tính lại Giá tiền
+  if (billingCycle !== undefined) {
+    updateData.billingCycle = billingCycle === 'yearly' ? 'yearly' : 'monthly';
+  }
+
+  if (planId !== undefined || billingCycle !== undefined) {
+    const effectiveCycle = updateData.billingCycle || existing.billingCycle;
+    updateData.pricePaid = effectiveCycle === 'yearly' ? planToUse.yearlyPrice : planToUse.monthlyPrice;
+  }
+
+  // Xử lý Phương thức thanh toán
+  if (paymentMethod !== undefined) {
+    if (paymentMethod && String(paymentMethod).trim()) {
+      const normalizedCode = String(paymentMethod).trim().toUpperCase();
+      const existingMethod = await prisma.paymentMethod.findUnique({
+        where: { code: normalizedCode }
+      });
+      if (!existingMethod) {
+        throw new AppError('Phương thức thanh toán không tồn tại trong hệ thống.', 400, 'VALIDATION_ERROR');
+      }
+      if (!existingMethod.isActive) {
+        throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng.', 400, 'VALIDATION_ERROR');
+      }
+      updateData.paymentMethod = normalizedCode;
+    } else {
+      updateData.paymentMethod = null;
     }
   }
 
-  if (endDate) {
+
+  if (paymentRef !== undefined) {
+    updateData.paymentRef = paymentRef ? String(paymentRef).trim() : null;
+  }
+
+  if (status === 'expired') {
+    updateData.endDate = getYesterdayEndOfDay();
+  } else if (endDate) {
     updateData.endDate = new Date(endDate);
+  }
+
+  const effectiveEndDate = updateData.endDate || existing.endDate;
+
+  if (new Date(effectiveEndDate) >= getStartOfToday()) {
+    await prisma.userSubscription.updateMany({
+      where: {
+        userId: existing.userId,
+        endDate: { gte: getStartOfToday() },
+        id: { not: subId }
+      },
+      data: {
+        endDate: getYesterdayEndOfDay()
+      }
+    });
   }
 
   if (notes !== undefined) {
