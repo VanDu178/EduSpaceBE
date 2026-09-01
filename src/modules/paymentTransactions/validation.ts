@@ -12,12 +12,11 @@ import {
   getTransactionsQuerySchema,
 } from './zodSchemas';
 
-
 /**
- * TẦNG 1 & TẦNG 2: Kiểm tra cú pháp (Zod) và Trạng thái DB cho khởi tạo đơn thanh toán
+ * 1. Validate cho createTransaction
  */
 export async function validateCreateTransactionData(userId: number, body: unknown) {
-  // 1. TẦNG 1: Validate cú pháp (không được rỗng và dữ liệu truyền xuống phải đúng format) bằng Zod Schema
+  // 1. TẦNG 1: Validate cú pháp bằng Zod Schema
   const parseResult = createTransactionSchema.safeParse(body);
   if (!parseResult.success) {
     const firstIssue = parseResult.error.issues[0] as any;
@@ -51,7 +50,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     );
   }
 
-  // 2. Kiểm tra Thông tin gói dịch vụ trong DB
+  // 3. Kiểm tra Thông tin gói dịch vụ trong DB
   const plan = await prisma.membershipPlan.findUnique({
     where: { id: planId },
   });
@@ -72,7 +71,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     );
   }
 
-  // 3. Kiểm tra cấp độ gói người dùng hiện tại (nếu đang có gói active)
+  // 4. Kiểm tra cấp độ gói người dùng hiện tại
   const activeSub = await prisma.userSubscription.findFirst({
     where: { userId, endDate: { gte: getStartOfToday() } },
     include: { plan: true },
@@ -86,7 +85,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     );
   }
 
-  // 4. Tìm tài khoản ngân hàng nhận tiền mặc định của hệ thống
+  // 5. Tìm tài khoản ngân hàng nhận tiền mặc định
   const paymentAccount = await prisma.paymentAccount.findFirst({
     where: {
       isDefault: true,
@@ -103,7 +102,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     );
   }
 
-  // 5. Tính số tiền thanh toán & kiểm tra chống sửa giá (Anti-tamper)
+  // 6. Tính số tiền thanh toán & Anti-tamper
   const amount = billingCycle === BILLING_CYCLES.YEARLY ? plan.yearlyPrice : plan.monthlyPrice;
 
   if (expectedPrice !== undefined && expectedPrice !== null) {
@@ -128,10 +127,9 @@ export async function validateCreateTransactionData(userId: number, body: unknow
 }
 
 /**
- * TẦNG 1 & TẦNG 2: Kiểm tra cú pháp (Zod) và Trạng thái DB cho lấy trạng thái giao dịch
+ * 2. Validate cho getTransactionStatus
  */
 export async function validateGetTransactionStatusData(params: unknown) {
-  // 1. TẦNG 1: Validate cú pháp (tham số code không được rỗng) bằng Zod Schema
   const parseResult = getTransactionStatusSchema.safeParse(params);
   if (!parseResult.success) {
     const firstIssue = parseResult.error.issues[0] as any;
@@ -143,7 +141,6 @@ export async function validateGetTransactionStatusData(params: unknown) {
 
   const { code } = parseResult.data;
 
-  // 2. TẦNG 2: Kiểm tra sự tồn tại của Giao dịch trong DB
   const transaction = await prisma.paymentTransaction.findUnique({
     where: { code: code.trim() },
     include: {
@@ -168,7 +165,7 @@ export async function validateGetTransactionStatusData(params: unknown) {
 }
 
 /**
- * TẦNG 1 & TẦNG 2: Kiểm tra cú pháp và Quyền/DB cho Hủy giao dịch
+ * 3. Validate cho cancelTransaction
  */
 export async function validateCancelTransactionData(
   user: { id: number; role: string } | undefined,
@@ -209,7 +206,7 @@ export async function validateCancelTransactionData(
 }
 
 /**
- * TẦNG 1 & TẦNG 2: Kiểm tra cú pháp và DB cho Duyệt giao dịch thủ công (Admin)
+ * 4. Validate cho approveTransaction
  */
 export async function validateApproveTransactionData(params: unknown, body: unknown) {
   const parseParams = approveTransactionSchema.safeParse({ ...(params as object), ...(body as object) });
@@ -236,7 +233,24 @@ export async function validateApproveTransactionData(params: unknown, body: unkn
 }
 
 /**
- * TẦNG 1 & TẦNG 2: Kiểm tra cú pháp và Quyền/DB cho Tải hóa đơn PDF
+ * 6. Validate Query params cho getTransactions (Admin)
+ */
+export function validateGetTransactionsQueryData(query: unknown) {
+  const parseResult = getTransactionsQuerySchema.safeParse(query);
+  if (!parseResult.success) {
+    const firstIssue = parseResult.error.issues[0] as any;
+    throw new AppError(
+      firstIssue?.message || 'Tham số truy vấn không hợp lệ',
+      firstIssue?.params?.statusCode || 400,
+      firstIssue?.params?.errorCode || 'VALIDATION_ERROR'
+    );
+  }
+
+  return parseResult.data;
+}
+
+/**
+ * 8. Validate cho downloadInvoicePdf
  */
 export async function validateDownloadInvoicePdfData(
   user: { id: number; role: string } | undefined,
@@ -276,23 +290,3 @@ export async function validateDownloadInvoicePdfData(
 
   return transaction;
 }
-
-/**
- * TẦNG 1: Validate Query params cho Danh sách giao dịch
- */
-export function validateGetTransactionsQueryData(query: unknown) {
-  const parseResult = getTransactionsQuerySchema.safeParse(query);
-  if (!parseResult.success) {
-    const firstIssue = parseResult.error.issues[0] as any;
-    throw new AppError(
-      firstIssue?.message || 'Tham số truy vấn không hợp lệ',
-      firstIssue?.params?.statusCode || 400,
-      firstIssue?.params?.errorCode || 'VALIDATION_ERROR'
-    );
-  }
-
-  return parseResult.data;
-}
-
-
-

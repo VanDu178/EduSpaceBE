@@ -1,7 +1,7 @@
 import type { Response, NextFunction } from 'express';
 import type { User } from '@prisma/client';
 import prisma from '../config/db';
-import { verifyAccessToken } from '../utils/authHelper';
+import { verifyAccessToken } from '../modules/auth/utils';
 import { AppError } from '../utils/appError';
 import { asyncHandler } from '../utils/asyncHandler';
 import type { Request } from 'express';

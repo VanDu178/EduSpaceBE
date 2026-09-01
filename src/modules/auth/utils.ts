@@ -1,6 +1,6 @@
 import type { Role } from '@prisma/client';
 import jwt, { SignOptions } from 'jsonwebtoken';
-import jwtConfig from '../config/jwt';
+import jwtConfig from '../../config/jwt';
 
 interface UserPayload {
   id: number;

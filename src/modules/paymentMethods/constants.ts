@@ -1,4 +1,15 @@
 /**
+ * HẰNG SỐ VÀ MAPPING CHO TRẠNG THÁI PHƯƠNG THỨC THANH TOÁN (PAYMENT METHOD STATUS)
+ */
+export const PAYMENT_METHOD_STATUS = {
+  ALL: 'ALL',
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+} as const;
+
+export type PaymentMethodStatus = typeof PAYMENT_METHOD_STATUS[keyof typeof PAYMENT_METHOD_STATUS];
+
+/**
  * HẰNG SỐ CHUẨN DUY NHẤT DÙNG CHO CÁC MÃ PHƯƠNG THỨC THANH TOÁN (PAYMENT METHOD CODES)
  * Tất cả các mã đều viết dưới dạng IN HOA (UPPERCASE)
  */
@@ -16,7 +27,6 @@ export const PAYMENT_METHOD_CODES = {
   CREDIT_CARD: 'CREDIT_CARD',
   E_WALLET: 'E_WALLET',
 } as const;
-
 
 export const DEFAULT_PAYMENT_METHODS: DefaultPaymentMethod[] = [
   {
@@ -45,7 +55,5 @@ export const DEFAULT_PAYMENT_METHODS: DefaultPaymentMethod[] = [
   },
 ];
 
-
 export type PaymentMethodCode = keyof typeof PAYMENT_METHOD_CODES;
-
 

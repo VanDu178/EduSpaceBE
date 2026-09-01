@@ -281,6 +281,3 @@ export const sendForgotPasswordOtpEmail = async ({
     return false;
   }
 };
-
-
-

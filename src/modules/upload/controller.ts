@@ -1,76 +1,65 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
-import { AppError } from '../../utils/appError';
-import { uploadToSupabase } from '../../utils/supabaseStorage';
+import {
+  validateUploadSingleFileData,
+  validateUploadMultipleFilesData,
+  validateDeleteFileData,
+} from './validation';
+import {
+  uploadSingleFileService,
+  uploadMultipleFilesService,
+  deleteFileService,
+} from './services';
 
 /**
- * Controller xử lý upload 1 file đơn lẻ
- * Route: POST /api/upload/single
+ * TẦNG THIN CONTROLLER: Phân luồng Request / Response
+ */
+
+/**
+ * 1. Controller xử lý upload 1 file đơn lẻ
+ * Route: POST /api/v1/upload/single
  */
 export const uploadSingleFile = asyncHandler(async (req: Request, res: Response) => {
-  const file = req.file;
-  if (!file) {
-    throw new AppError('Vui lòng chọn file cần tải lên!', 400);
-  }
+  // Step 1 & 2: Validate dữ liệu đầu vào
+  const { file, folder } = await validateUploadSingleFileData(req.file, req.body);
 
-  // Lấy thuộc tính folder từ body nếu có (mặc định 'blogs')
-  const folder = (req.body.folder as string) || 'blogs';
+  // Step 3: Gọi Service xử lý nghiệp vụ
+  const result = await uploadSingleFileService(file, folder);
 
-  const result = await uploadToSupabase(
-    file.buffer,
-    file.originalname,
-    file.mimetype,
-    { folder }
-  );
-
+  // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, result, 'Tải file lên hệ thống thành công!', 201);
 });
 
 /**
- * Controller xử lý upload nhiều file cùng lúc
- * Route: POST /api/upload/multiple
+ * 2. Controller xử lý upload nhiều file cùng lúc
+ * Route: POST /api/v1/upload/multiple
  */
 export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Response) => {
-  const files = req.files as Express.Multer.File[];
-  if (!files || files.length === 0) {
-    throw new AppError('Vui lòng chọn ít nhất 1 file để tải lên!', 400);
-  }
-
-  const folder = (req.body.folder as string) || 'blogs';
-
-  const uploadPromises = files.map(file =>
-    uploadToSupabase(file.buffer, file.originalname, file.mimetype, { folder })
+  // Step 1 & 2: Validate dữ liệu đầu vào
+  const { files, folder } = await validateUploadMultipleFilesData(
+    req.files as Express.Multer.File[],
+    req.body
   );
 
-  const results = await Promise.all(uploadPromises);
+  // Step 3: Gọi Service xử lý nghiệp vụ
+  const results = await uploadMultipleFilesService(files, folder);
 
+  // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, results, `Đã tải lên thành công ${results.length} file!`, 201);
 });
 
 /**
- * Controller xử lý xóa file khỏi Supabase Storage
+ * 3. Controller xử lý xóa file khỏi Supabase Storage
  * Route: DELETE /api/v1/upload
  */
 export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
-  const urlOrPath = req.body?.url || req.body?.path || (req.query?.url as string);
+  // Step 1 & 2: Validate dữ liệu đầu vào
+  const { filePath } = await validateDeleteFileData(req.body, req.query);
 
-  if (!urlOrPath) {
-    throw new AppError('Vui lòng cung cấp đường dẫn tệp cần xóa!', 400);
-  }
+  // Step 3: Gọi Service xử lý nghiệp vụ
+  const result = await deleteFileService(filePath);
 
-  const { extractStoragePath, deleteFromSupabase } = await import('../../utils/supabaseStorage');
-  const filePath = extractStoragePath(urlOrPath);
-
-  if (!filePath) {
-    throw new AppError('Đường dẫn tệp không hợp lệ!', 400);
-  }
-
-  const success = await deleteFromSupabase(filePath);
-  if (!success) {
-    throw new AppError('Xóa tệp thất bại!', 500);
-  }
-
-  return sendSuccess(res, { path: filePath }, 'Xóa tệp khỏi hệ thống thành công!');
+  // Step 4: Trả phản hồi về cho client
+  return sendSuccess(res, result, 'Xóa tệp khỏi hệ thống thành công!');
 });
-

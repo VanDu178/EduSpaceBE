@@ -1,6 +1,6 @@
 import path from 'path';
 import { supabase, SUPABASE_BUCKET_NAME } from '../config/supabase';
-import { AppError } from './appError';
+import { AppError } from '../utils/appError';
 
 export interface UploadOptions {
   folder?: string;
@@ -162,7 +162,6 @@ export async function cleanupProofImages(urls: (string | null | undefined)[] | n
 
   return deletedCount;
 }
-
 
 function getExtensionFromMime(mimeType: string): string {
   const mimeMap: Record<string, string> = {

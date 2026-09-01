@@ -1,5 +1,5 @@
 import prisma from '../config/db';
-import { getStartOfToday } from './dateHelpers';
+import { getStartOfToday } from '../utils/dateHelpers';
 
 /**
  * Kiểm tra xem người dùng có quyền sử dụng một tính năng cụ thể dựa trên gói hội viên đang hoạt động của họ hay không.

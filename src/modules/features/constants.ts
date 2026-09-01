@@ -60,3 +60,15 @@ export const SYSTEM_FEATURE_METADATA: Record<FeatureCode, SystemFeatureMetadata>
     description: 'Quyền tham gia các buổi chia sẻ, phân tích xu hướng thị trường'
   }
 };
+
+/**
+ * Hằng số trạng thái & lọc trạng thái cho tính năng.
+ */
+export const FEATURE_STATUS = {
+  ALL: 'ALL',
+  ACTIVE: 'active',
+  INACTIVE: 'inactive'
+} as const;
+
+export type FeatureStatus = (typeof FEATURE_STATUS)[keyof typeof FEATURE_STATUS];
+

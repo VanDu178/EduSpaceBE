@@ -1,22 +1,34 @@
 import express from 'express';
 import multer from 'multer';
+import { UPLOAD_CONFIG } from './constants';
 import { uploadSingleFile, uploadMultipleFiles, deleteFile } from './controller';
 
+/**
+ * TẦNG ĐỊNH TUYẾN ENDPOINT HTTP & MIDDLEWARE
+ */
 const uploadRoutes = express.Router();
 
 // Cấu hình Multer lưu file tạm trong Memory (Buffer)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024 // Tối đa 50MB mỗi file (hỗ trợ cả video)
-  }
+    fileSize: UPLOAD_CONFIG.MAX_FILE_SIZE_BYTES,
+  },
 });
 
-// Route upload 1 file (field key là 'file')
-uploadRoutes.post('/single', upload.single('file'), uploadSingleFile);
+// Route upload 1 file (field key mặc định là 'file')
+uploadRoutes.post(
+  '/single',
+  upload.single(UPLOAD_CONFIG.SINGLE_FILE_FIELD_KEY),
+  uploadSingleFile
+);
 
-// Route upload nhiều file (field key là 'files', tối đa 10 file 1 lần)
-uploadRoutes.post('/multiple', upload.array('files', 10), uploadMultipleFiles);
+// Route upload nhiều file (field key mặc định là 'files', tối đa MAX_FILES_COUNT file 1 lần)
+uploadRoutes.post(
+  '/multiple',
+  upload.array(UPLOAD_CONFIG.MULTIPLE_FILES_FIELD_KEY, UPLOAD_CONFIG.MAX_FILES_COUNT),
+  uploadMultipleFiles
+);
 
 // Route xóa file
 uploadRoutes.delete('/', deleteFile);

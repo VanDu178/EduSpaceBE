@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createRefund, getRefunds, updateRefund } from './controller';
+import { getRefunds, createRefund, updateRefund } from './controller';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { adminMiddleware } from '../../middlewares/adminMiddleware';
 

@@ -1,544 +1,74 @@
 import type { Request, Response } from 'express';
-import prisma from '../../config/db';
-import { AppError } from '../../utils/appError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
-import { generateSubscriptionCode } from '../../utils/codeGenerator';
-import { getStartOfToday, getYesterdayEndOfDay, isSubscriptionActive } from '../../utils/dateHelpers';
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
-
-/**
- * Lấy danh sách lịch sử đăng ký & thanh toán (Chỉ Admin).
- * Hỗ trợ phân trang, lọc theo userId, status, và tìm kiếm từ khóa email/mã đơn.
- */
-export const getSubscriptions = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string, 10) || 1;
-  const limit = parseInt(req.query.limit as string, 10) || 10;
-  const skip = (page - 1) * limit;
-
-  const { userId, status, search } = req.query;
-
-  const whereClause: any = {};
-
-  // Lọc theo người dùng cụ thể
-  if (userId) {
-    const parsedUserId = parseInt(userId as string, 10);
-    if (!isNaN(parsedUserId)) {
-      whereClause.userId = parsedUserId;
-    }
-  }
-
-  // Lọc theo trạng thái gói (active, expired) dựa theo endDate
-  if (status && status !== 'all') {
-    const startOfToday = getStartOfToday();
-    if (status === 'active') {
-      whereClause.endDate = { gte: startOfToday };
-    } else if (status === 'expired') {
-      whereClause.endDate = { lt: startOfToday };
-    }
-  }
-
-  // Tìm kiếm theo từ khóa (Mã đơn đăng ký, Email người dùng, Tên người dùng)
-  if (search && (search as string).trim() !== '') {
-    const keyword = (search as string).trim();
-    whereClause.OR = [
-      { code: { contains: keyword } },
-      { user: { email: { contains: keyword } } },
-      { user: { name: { contains: keyword } } },
-      { plan: { name: { contains: keyword } } }
-    ];
-  }
-
-  // Đếm tổng số bản ghi
-  const totalItems = await prisma.userSubscription.count({
-    where: whereClause
-  });
-
-  // Lấy dữ liệu phân trang
-  const subscriptions = await prisma.userSubscription.findMany({
-    where: whereClause,
-    skip,
-    take: limit,
-    orderBy: { createdAt: 'desc' },
-    include: {
-      user: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true,
-          avatarUrl: true
-        }
-      },
-      createdByUser: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true,
-          avatarUrl: true
-        }
-      },
-      plan: {
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          monthlyPrice: true,
-          yearlyPrice: true,
-          popularBadge: true
-        }
-      }
-    }
-  });
-
-  const formattedItems = subscriptions.map(sub => ({
-    ...sub,
-    status: isSubscriptionActive(sub.endDate) ? 'active' : 'expired'
-  }));
-
-  const totalPages = Math.ceil(totalItems / limit);
-
-  return sendSuccess(res, {
-    items: formattedItems,
-    pagination: {
-      currentPage: page,
-      totalPages,
-      totalItems,
-      itemsPerPage: limit
-    }
-  }, 'Lấy danh sách hội viên thành công');
-});
-
+import {
+  validateGetMySubscriptionsData,
+  validateGetSubscriptionByIdData,
+  validateCreateSubscriptionData,
+  validateGetSubscriptionsData,
+  validateUpdateSubscriptionStatusData,
+  validateDeleteSubscriptionData,
+} from './validation';
+import {
+  getMySubscriptionsService,
+  getSubscriptionByIdService,
+  createSubscriptionService,
+  getSubscriptionsService,
+  updateSubscriptionStatusService,
+  deleteSubscriptionService,
+} from './services';
 
 /**
  * User đang đăng nhập tự lấy lịch sử đăng ký của chính mình.
  */
 export const getMySubscriptions = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const userId = req.user?.id;
-  if (!userId) {
-    throw new AppError('Bạn chưa đăng nhập', 401, 'UNAUTHORIZED');
-  }
-
-  const subscriptions = await prisma.userSubscription.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      plan: {
-        include: {
-          planFeatures: {
-            include: {
-              feature: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  // Lấy gói đang có hiệu lực (chưa hết hạn theo ngày)
-  const activeSubscriptionRaw = subscriptions.find(
-    sub => isSubscriptionActive(sub.endDate)
-  ) || null;
-
-  const formattedSubscriptions = subscriptions.map(sub => ({
-    ...sub,
-    status: isSubscriptionActive(sub.endDate) ? 'active' : 'expired'
-  }));
-
-  const activeSubscription = activeSubscriptionRaw ? {
-    ...activeSubscriptionRaw,
-    status: 'active' as const
-  } : null;
-
-  return sendSuccess(res, {
-    subscriptions: formattedSubscriptions,
-    activeSubscription
-  }, 'Lấy thông tin đăng ký cá nhân thành công');
+  const { userId } = await validateGetMySubscriptionsData(req.user!);
+  const result = await getMySubscriptionsService(userId);
+  return sendSuccess(res, result, 'Lấy thông tin đăng ký cá nhân thành công');
 });
 
 /**
- * Xem chi tiết 1 đơn đăng ký theo ID.
+ * Xem chi tiết 1 đơn đăng ký theo ID (Chính chủ hoặc Admin).
  */
 export const getSubscriptionById = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params;
-  const subId = parseInt(id as string, 10);
-
-  if (isNaN(subId)) {
-    throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  const subscription = await prisma.userSubscription.findUnique({
-    where: { id: subId },
-    include: {
-      user: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true,
-          avatarUrl: true
-        }
-      },
-      plan: true
-    }
-  });
-
-  if (!subscription) {
-    throw new AppError('Đơn đăng ký không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  // Kiểm tra quyền: Chỉ Admin hoặc chính chủ sở hữu đơn mới được xem
-  if (req.user?.role !== 'admin' && req.user?.id !== subscription.userId) {
-    throw new AppError('Bạn không có quyền xem thông tin đơn đăng ký này', 403, 'FORBIDDEN');
-  }
-
-  return sendSuccess(res, subscription, 'Lấy chi tiết đơn đăng ký thành công');
+  const { subscription } = await validateGetSubscriptionByIdData(req.user, req.params);
+  const result = await getSubscriptionByIdService(subscription);
+  return sendSuccess(res, result, 'Lấy chi tiết đơn đăng ký thành công');
 });
 
 /**
  * Tạo mới một đăng ký gói hội viên (Admin cấp gói hoặc User mua gói).
  */
 export const createSubscription = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const {
-    userId: bodyUserId,
-    planId,
-    billingCycle = 'monthly',
-    paymentMethod,
-    paymentRef,
-    status = 'active',
-    notes,
-    proofUrls,
-    startDate: customStartDate,
-    endDate: customEndDate
-  } = req.body;
+  const validData = await validateCreateSubscriptionData(req.user, req.body);
+  const result = await createSubscriptionService(req.user, validData);
+  return sendSuccess(res, result, 'Đăng ký gói hội viên thành công', 201);
+});
 
-  // Xác định người dùng nhận gói
-  const targetUserId = req.user?.role === 'admin' && bodyUserId ? parseInt(bodyUserId, 10) : req.user?.id;
-
-  if (!targetUserId || isNaN(targetUserId)) {
-    throw new AppError('Người dùng không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  // Kiểm tra sự tồn tại của User
-  const user = await prisma.user.findUnique({
-    where: { id: targetUserId }
-  });
-
-  if (!user) {
-    throw new AppError('Người dùng không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  // Kiểm tra sự tồn tại của Gói hội viên
-  const parsedPlanId = parseInt(planId, 10);
-  if (isNaN(parsedPlanId)) {
-    throw new AppError('Gói hội viên không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  const plan = await prisma.membershipPlan.findUnique({
-    where: { id: parsedPlanId }
-  });
-
-  if (!plan) {
-    throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  if (!plan.isActive) {
-    throw new AppError('Gói hội viên này hiện đang tạm ẩn, không thể đăng ký', 400, 'VALIDATION_ERROR');
-  }
-
-  // Kiểm tra phương thức thanh toán nếu được cung cấp
-  if (paymentMethod && String(paymentMethod).trim()) {
-    const normalizedCode = String(paymentMethod).trim().toUpperCase();
-    const existingMethod = await prisma.paymentMethod.findUnique({
-      where: { code: normalizedCode }
-    });
-    if (!existingMethod) {
-      throw new AppError('Phương thức thanh toán không tồn tại trong hệ thống.', 400, 'VALIDATION_ERROR');
-    }
-    if (!existingMethod.isActive) {
-      throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng.', 400, 'VALIDATION_ERROR');
-    }
-  }
-
-  // Tính toán thời gian bắt đầu và hết hạn
-  const startDate = customStartDate ? new Date(customStartDate) : new Date();
-  const endDate = customEndDate ? new Date(customEndDate) : new Date(startDate);
-
-  if (!customEndDate) {
-    if (billingCycle === 'yearly') {
-      endDate.setFullYear(endDate.getFullYear() + 1);
-    } else {
-      endDate.setMonth(endDate.getMonth() + 1);
-    }
-  }
-
-  // Xác định nguồn tạo gói (admin cấp thủ công hoặc system tự động)
-  const isAdminCreated = req.user?.role === 'admin';
-  const createdType = isAdminCreated ? 'admin' : 'system';
-  const createdBy = isAdminCreated && req.user ? req.user.id : null;
-
-  // Xử lý danh sách ảnh minh chứng (tối đa 5 ảnh)
-  const safeProofUrls = Array.isArray(proofUrls) ? proofUrls.slice(0, 5) : null;
-
-  // Xác định số tiền thanh toán dựa trên chu kỳ đã chọn
-  const pricePaid = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
-
-  // Tự động kết thúc thời hạn (chuyển endDate về ngày hôm qua) cho các gói cũ còn hạn của User
-  await prisma.userSubscription.updateMany({
-    where: {
-      userId: targetUserId,
-      endDate: { gte: getStartOfToday() }
-    },
-    data: {
-      endDate: getYesterdayEndOfDay()
-    }
-  });
-
-  // Bước 1: Tạo bản ghi với mã tạm
-  const tempSub = await prisma.userSubscription.create({
-    data: {
-      code: `SUB-TEMP-${Date.now()}`,
-      userId: targetUserId,
-      planId: parsedPlanId,
-      billingCycle: billingCycle === 'yearly' ? 'yearly' : 'monthly',
-      startDate,
-      endDate,
-      pricePaid,
-      paymentMethod: paymentMethod ? String(paymentMethod).trim().toUpperCase() : (isAdminCreated ? 'ADMIN_ASSIGNED' : null),
-      paymentRef: paymentRef ? String(paymentRef).trim() : null,
-      createdType,
-      createdBy,
-      notes: notes ? String(notes).trim() : null,
-      proofUrls: safeProofUrls as any
-    }
-  });
-
-  // Bước 2: Sinh mã chuẩn SUB-XXXXXX và cập nhật
-  const code = generateSubscriptionCode(tempSub.id);
-  const subscription = await prisma.userSubscription.update({
-    where: { id: tempSub.id },
-    data: { code },
-    include: {
-      plan: true,
-      user: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true
-        }
-      }
-    }
-  });
-
-  return sendSuccess(res, subscription, 'Đăng ký gói hội viên thành công', 201);
+/**
+ * Lấy danh sách lịch sử đăng ký & thanh toán (Chỉ Admin).
+ */
+export const getSubscriptions = asyncHandler(async (req: Request, res: Response) => {
+  const queryData = await validateGetSubscriptionsData(req.query);
+  const result = await getSubscriptionsService(queryData);
+  return sendSuccess(res, result, 'Lấy danh sách hội viên thành công');
 });
 
 /**
  * Cập nhật trạng thái đơn đăng ký (Chỉ Admin duyệt/hủy/gia hạn).
- * CHẶN: Các gói có createdType === 'system' (từ thanh toán tự động) KHÔNG ĐƯỢC phép sửa.
  */
 export const updateSubscriptionStatus = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const subId = parseInt(id as string, 10);
-  const {
-    userId,
-    planId,
-    billingCycle,
-    status,
-    paymentMethod,
-    paymentRef,
-    endDate,
-    notes,
-    proofUrls
-  } = req.body;
-
-  if (isNaN(subId)) {
-    throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  const existing = await prisma.userSubscription.findUnique({
-    where: { id: subId },
-    include: { plan: true }
-  });
-
-  if (!existing) {
-    throw new AppError('Đơn đăng ký không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  // BẢO VỆ DỮ LIỆU: Bản ghi do Hệ thống (system) tự động kích hoạt KHÔNG CHO PHÉP chỉnh sửa
-  if (existing.createdType === 'system') {
-    throw new AppError('Gói dịch vụ kích hoạt tự động từ hệ thống thanh toán không được phép chỉnh sửa', 403, 'FORBIDDEN');
-  }
-
-  const updateData: any = {};
-
-  // Xử lý cập nhật Người dùng nhận gói (userId)
-  if (userId !== undefined && userId !== null) {
-    const parsedUserId = parseInt(userId, 10);
-    if (isNaN(parsedUserId)) {
-      throw new AppError('Người dùng không hợp lệ', 400, 'VALIDATION_ERROR');
-    }
-    const user = await prisma.user.findUnique({
-      where: { id: parsedUserId }
-    });
-    if (!user) {
-      throw new AppError('Người dùng không tồn tại', 404, 'NOT_FOUND');
-    }
-    updateData.userId = parsedUserId;
-  }
-
-  // Xử lý cập nhật Gói hội viên
-  let planToUse = existing.plan;
-  if (planId !== undefined && planId !== null) {
-    const parsedPlanId = parseInt(planId, 10);
-    if (isNaN(parsedPlanId)) {
-      throw new AppError('Gói hội viên không hợp lệ', 400, 'VALIDATION_ERROR');
-    }
-    const plan = await prisma.membershipPlan.findUnique({
-      where: { id: parsedPlanId }
-    });
-    if (!plan) {
-      throw new AppError('Gói hội viên không tồn tại', 404, 'NOT_FOUND');
-    }
-    updateData.planId = parsedPlanId;
-    planToUse = plan;
-  }
-
-  // Xử lý Chu kỳ thanh toán & tính lại Giá tiền
-  if (billingCycle !== undefined) {
-    updateData.billingCycle = billingCycle === 'yearly' ? 'yearly' : 'monthly';
-  }
-
-  if (planId !== undefined || billingCycle !== undefined) {
-    const effectiveCycle = updateData.billingCycle || existing.billingCycle;
-    updateData.pricePaid = effectiveCycle === 'yearly' ? planToUse.yearlyPrice : planToUse.monthlyPrice;
-  }
-
-  // Xử lý Phương thức thanh toán
-  if (paymentMethod !== undefined) {
-    if (paymentMethod && String(paymentMethod).trim()) {
-      const normalizedCode = String(paymentMethod).trim().toUpperCase();
-      const existingMethod = await prisma.paymentMethod.findUnique({
-        where: { code: normalizedCode }
-      });
-      if (!existingMethod) {
-        throw new AppError('Phương thức thanh toán không tồn tại trong hệ thống.', 400, 'VALIDATION_ERROR');
-      }
-      if (!existingMethod.isActive) {
-        throw new AppError('Phương thức thanh toán đã chọn hiện đang tạm ngưng.', 400, 'VALIDATION_ERROR');
-      }
-      updateData.paymentMethod = normalizedCode;
-    } else {
-      updateData.paymentMethod = null;
-    }
-  }
-
-
-  if (paymentRef !== undefined) {
-    updateData.paymentRef = paymentRef ? String(paymentRef).trim() : null;
-  }
-
-  if (status === 'expired') {
-    updateData.endDate = getYesterdayEndOfDay();
-  } else if (endDate) {
-    updateData.endDate = new Date(endDate);
-  }
-
-  const effectiveEndDate = updateData.endDate || existing.endDate;
-
-  if (new Date(effectiveEndDate) >= getStartOfToday()) {
-    await prisma.userSubscription.updateMany({
-      where: {
-        userId: existing.userId,
-        endDate: { gte: getStartOfToday() },
-        id: { not: subId }
-      },
-      data: {
-        endDate: getYesterdayEndOfDay()
-      }
-    });
-  }
-
-  if (notes !== undefined) {
-    updateData.notes = notes ? String(notes).trim() : null;
-  }
-
-  // Dọn dẹp các ảnh bị gỡ bỏ khỏi Supabase Storage để chống rác
-  if (proofUrls !== undefined && Array.isArray(proofUrls)) {
-    const oldUrls: string[] = Array.isArray(existing.proofUrls) ? (existing.proofUrls as string[]) : [];
-    const removedUrls = oldUrls.filter(url => !proofUrls.includes(url));
-    if (removedUrls.length > 0) {
-      const { cleanupProofImages } = await import('../../utils/supabaseStorage');
-      await cleanupProofImages(removedUrls);
-    }
-    updateData.proofUrls = proofUrls.slice(0, 5);
-  }
-
-  const updated = await prisma.userSubscription.update({
-    where: { id: subId },
-    data: updateData,
-    include: {
-      plan: true,
-      user: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true
-        }
-      },
-      createdByUser: {
-        select: {
-          id: true,
-          code: true,
-          email: true,
-          name: true
-        }
-      }
-    }
-  });
-
-  return sendSuccess(res, updated, 'Cập nhật trạng thái đăng ký thành công');
+  const { subId, existing, body } = await validateUpdateSubscriptionStatusData(req.params, req.body);
+  const result = await updateSubscriptionStatusService(subId, existing, body);
+  return sendSuccess(res, result, 'Cập nhật trạng thái đăng ký thành công');
 });
 
 /**
- * Xóa đơn đăng ký gói hội viên.
- * CHẶN: Các gói do Hệ thống (system) tự động kích hoạt KHÔNG ĐƯỢC phép xóa.
- * Chỉ áp dụng cho các gói do Admin cấp thủ công (createdType === 'admin').
+ * Xóa đơn đăng ký gói hội viên cấp thủ công (Chỉ Admin).
  */
 export const deleteSubscription = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const subId = parseInt(id as string, 10);
-
-  if (isNaN(subId)) {
-    throw new AppError('Mã đăng ký không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  const existing = await prisma.userSubscription.findUnique({
-    where: { id: subId }
-  });
-
-  if (!existing) {
-    throw new AppError('Đơn đăng ký không tồn tại', 404, 'NOT_FOUND');
-  }
-
-  // BẢO VỆ DỮ LIỆU: Bản ghi do Hệ thống (system) tự động tạo KHÔNG CHO PHÉP xóa
-  if (existing.createdType === 'system') {
-    throw new AppError('Gói dịch vụ kích hoạt tự động từ hệ thống thanh toán không được phép xóa', 403, 'FORBIDDEN');
-  }
-
-  // Dọn dẹp toàn bộ file ảnh minh chứng trên Supabase Storage trước khi xóa khỏi DB
-  const oldUrls: string[] = Array.isArray(existing.proofUrls) ? (existing.proofUrls as string[]) : [];
-  if (oldUrls.length > 0) {
-    const { cleanupProofImages } = await import('../../utils/supabaseStorage');
-    await cleanupProofImages(oldUrls);
-  }
-
-  await prisma.userSubscription.delete({
-    where: { id: subId }
-  });
-
-  return sendSuccess(res, { deletedId: subId }, 'Xóa gói hội viên cấp thủ công thành công');
+  const { subId, existing } = await validateDeleteSubscriptionData(req.params);
+  const result = await deleteSubscriptionService(subId, existing);
+  return sendSuccess(res, result, 'Xóa gói hội viên cấp thủ công thành công');
 });

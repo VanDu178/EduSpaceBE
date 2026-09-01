@@ -3,12 +3,12 @@ import {
   register,
   login,
   googleLogin,
+  forgotPassword,
+  resetPassword,
+  changePassword,
   tokenRefresh,
   logout,
   getMe,
-  forgotPassword,
-  resetPassword,
-  changePassword
 } from './controller';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 
@@ -42,4 +42,3 @@ router.post('/logout', logout as express.RequestHandler);
 router.get('/me', authMiddleware as any, getMe as any);
 
 export default router;
-

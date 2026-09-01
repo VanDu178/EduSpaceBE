@@ -1,13 +1,13 @@
 import express from 'express';
 import {
-  getPaymentMethods,
   getActivePaymentMethods,
+  getPaymentMethods,
   getPaymentMethodById,
   createPaymentMethod,
   updatePaymentMethod,
+  updatePaymentMethodSortOrder,
   togglePaymentMethodStatus,
   deletePaymentMethod,
-  updatePaymentMethodSortOrder
 } from './controller';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 
