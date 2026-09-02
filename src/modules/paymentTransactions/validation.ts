@@ -26,7 +26,7 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     throw new AppError(message, statusCode, errorCode);
   }
 
-  const { planId, paymentMethod, billingCycle = BILLING_CYCLES.MONTHLY, expectedPrice } = parseResult.data;
+  const { planId, paymentMethod, billingCycle = BILLING_CYCLES.MONTHLY, expectedPrice, cancelCode, forceNew } = parseResult.data;
 
   // 2. TẦNG 2: Kiểm tra Phương thức thanh toán trong DB
   const normalizedPaymentMethod = paymentMethod.trim().toUpperCase();
@@ -123,13 +123,15 @@ export async function validateCreateTransactionData(userId: number, body: unknow
     paymentAccount,
     amount,
     billingCycle,
+    cancelCode,
+    forceNew,
   };
 }
 
 /**
- * 2. Validate cho getTransactionStatus
+ * 2. Validate cho getTransactionByCode (Lấy đầy đủ thông tin giao dịch)
  */
-export async function validateGetTransactionStatusData(params: unknown) {
+export async function validateGetTransactionByCodeData(params: unknown) {
   const parseResult = getTransactionStatusSchema.safeParse(params);
   if (!parseResult.success) {
     const firstIssue = parseResult.error.issues[0] as any;
@@ -155,6 +157,32 @@ export async function validateGetTransactionStatusData(params: unknown) {
         orderBy: { createdAt: 'desc' }
       }
     }
+  });
+
+  if (!transaction) {
+    throw new AppError('Không tìm thấy thông tin giao dịch', 404, 'NOT_FOUND');
+  }
+
+  return transaction;
+}
+
+/**
+ * 2b. Validate cho getTransactionStatus (Chỉ dùng cho Polling nhẹ)
+ */
+export async function validateGetTransactionStatusData(params: unknown) {
+  const parseResult = getTransactionStatusSchema.safeParse(params);
+  if (!parseResult.success) {
+    const firstIssue = parseResult.error.issues[0] as any;
+    const message = firstIssue?.message || 'Mã giao dịch không hợp lệ';
+    const errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
+    const statusCode = firstIssue?.params?.statusCode || 400;
+    throw new AppError(message, statusCode, errorCode);
+  }
+
+  const { code } = parseResult.data;
+
+  const transaction = await prisma.paymentTransaction.findUnique({
+    where: { code: code.trim() },
   });
 
   if (!transaction) {

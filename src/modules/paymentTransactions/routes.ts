@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createTransaction,
   getTransactionStatus,
+  getTransactionByCode,
   cancelTransaction,
   approveTransaction,
   handleWebhook,
@@ -14,7 +15,8 @@ import { adminMiddleware } from '../../middlewares/adminMiddleware';
 
 const router = Router();
 
-// Route công khai kiểm tra trạng thái đơn (Client polling) & Xử lý Webhook ngân hàng
+// Route công khai kiểm tra chi tiết & trạng thái đơn (Client) & Xử lý Webhook ngân hàng
+router.get('/by-code/:code', getTransactionByCode as any);
 router.get('/status/:code', getTransactionStatus as any);
 router.post('/webhook', handleWebhook as any);
 

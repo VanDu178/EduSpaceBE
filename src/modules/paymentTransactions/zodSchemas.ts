@@ -86,6 +86,9 @@ export const createTransactionSchema = z.object({
       )
     )
     .optional(),
+
+  cancelCode: z.string().trim().optional(),
+  forceNew: z.boolean().optional(),
 });
 
 

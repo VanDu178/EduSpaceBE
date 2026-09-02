@@ -5,6 +5,7 @@ import { AppError } from '../../utils/appError';
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
 import {
   validateCreateTransactionData,
+  validateGetTransactionByCodeData,
   validateGetTransactionStatusData,
   validateCancelTransactionData,
   validateApproveTransactionData,
@@ -13,6 +14,7 @@ import {
 } from './validation';
 import {
   createTransactionService,
+  getTransactionByCodeService,
   getTransactionStatusService,
   cancelTransactionService,
   approveTransactionService,
@@ -34,6 +36,19 @@ export const createTransaction = asyncHandler(async (req: AuthenticatedRequest, 
   const transaction = await createTransactionService(userId, validatedData);
 
   return sendSuccess(res, transaction, 'Vui lòng quét mã VietQR để hoàn tất chuyển khoản.', 201);
+});
+
+/**
+ * Lấy đầy đủ thông tin giao dịch thanh toán theo mã Code (Cho lần load đầu tiên)
+ */
+export const getTransactionByCode = asyncHandler(async (req: Request, res: Response) => {
+  // 1. Validate dữ liệu đầu vào
+  const transaction = await validateGetTransactionByCodeData(req.params);
+
+  // 2. Gọi tầng Service lấy chi tiết đầy đủ dữ liệu
+  const { data, message } = await getTransactionByCodeService(transaction);
+
+  return sendSuccess(res, data, message);
 });
 
 /**

@@ -46,9 +46,76 @@ export const createTransactionService = async (
     paymentAccount: any;
     amount: any;
     billingCycle: string;
+    cancelCode?: string;
+    forceNew?: boolean;
   }
 ) => {
-  const { plan, targetPaymentMethod, paymentAccount, amount, billingCycle } = validatedData;
+  const { plan, targetPaymentMethod, paymentAccount, amount, billingCycle, cancelCode, forceNew } = validatedData;
+  const normalizedCycle = billingCycle === BILLING_CYCLES.YEARLY ? BILLING_CYCLES.YEARLY : BILLING_CYCLES.MONTHLY;
+
+  // 1a. Nếu Client chỉ định hủy một đơn cụ thể (cancelCode) trước khi tạo đơn mới
+  if (cancelCode) {
+    const targetToCancel = await prisma.paymentTransaction.findUnique({
+      where: { code: cancelCode },
+    });
+    if (
+      targetToCancel &&
+      targetToCancel.userId === userId &&
+      (targetToCancel.status === TRANSACTION_STATUS.PENDING ||
+        targetToCancel.status === TRANSACTION_STATUS.PARTIALLY_PAID)
+    ) {
+      const remainingSeconds = Math.floor((new Date(targetToCancel.expiredAt).getTime() - Date.now()) / 1000);
+      const nextStatus = remainingSeconds > 0 ? TRANSACTION_STATUS.CANCELLED : TRANSACTION_STATUS.EXPIRED;
+      await prisma.paymentTransaction.update({
+        where: { id: targetToCancel.id },
+        data: { status: nextStatus },
+      });
+    }
+  }
+
+  // 1b. Kiểm tra xem người dùng đã có giao dịch PENDING hoặc PARTIALLY_PAID trùng khớp hay chưa (chỉ check khi KHÔNG forceNew/cancelCode)
+  if (!forceNew && !cancelCode) {
+    const existingTransaction = await prisma.paymentTransaction.findFirst({
+      where: {
+        userId,
+        planId: plan.id,
+        billingCycle: normalizedCycle,
+        paymentMethod: targetPaymentMethod.code,
+        status: {
+          in: [TRANSACTION_STATUS.PENDING, TRANSACTION_STATUS.PARTIALLY_PAID],
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        plan: {
+          select: { id: true, code: true, name: true }
+        },
+        paymentAccount: {
+          include: { bank: true }
+        }
+      }
+    });
+
+    if (existingTransaction) {
+      const remainingSeconds = Math.floor((new Date(existingTransaction.expiredAt).getTime() - Date.now()) / 1000);
+
+      // Nếu thời gian còn lại > 5 phút (300 giây): Tái sử dụng (Re-use) giao dịch cũ
+      if (remainingSeconds > 300) {
+        return existingTransaction;
+      }
+
+      // Nếu thời gian còn lại <= 5 phút (300 giây):
+      // - Còn thời gian (0 < remainingSeconds <= 300): Chuyển sang CANCELLED
+      // - Đã hết thời gian (remainingSeconds <= 0): Chuyển sang EXPIRED
+      const nextStatus = remainingSeconds > 0 ? TRANSACTION_STATUS.CANCELLED : TRANSACTION_STATUS.EXPIRED;
+      await prisma.paymentTransaction.update({
+        where: { id: existingTransaction.id },
+        data: { status: nextStatus },
+      });
+    }
+  }
 
   // Sinh mã đơn ngẫu nhiên duy nhất
   let code = generatePaymentTransactionCode();
@@ -131,12 +198,12 @@ export const createTransactionService = async (
 };
 
 /**
- * 2. Service: Lấy trạng thái giao dịch & Live Sync với PayOS API
+ * 2a. Service: Lấy chi tiết đầy đủ giao dịch thanh toán theo mã Code
  */
-export const getTransactionStatusService = async (initialTransaction: any) => {
+export const getTransactionByCodeService = async (initialTransaction: any) => {
   let transaction = initialTransaction;
 
-  // 1. Tự động cập nhật hết hạn nếu quá 24h mà vẫn PENDING
+  // Tự động cập nhật hết hạn nếu quá 24h mà vẫn PENDING
   if (transaction.status === TRANSACTION_STATUS.PENDING && new Date() > new Date(transaction.expiredAt)) {
     transaction = await prisma.paymentTransaction.update({
       where: { id: transaction.id },
@@ -153,6 +220,60 @@ export const getTransactionStatusService = async (initialTransaction: any) => {
           orderBy: { createdAt: 'desc' }
         }
       }
+    });
+  }
+
+  const amount = Number(transaction.amount);
+  const paidAmount = Number(transaction.paidAmount);
+  const overpaidAmount = Math.max(0, paidAmount - amount);
+  const remainingAmount = Math.max(0, amount - paidAmount);
+  const totalRefundedAmount = (transaction.refunds || []).reduce((acc: number, r: any) => acc + Number(r.amount), 0);
+
+  let responseQrCodeUrl = transaction.qrCodeUrl;
+  if (transaction.status === TRANSACTION_STATUS.PARTIALLY_PAID && responseQrCodeUrl) {
+    responseQrCodeUrl = responseQrCodeUrl.replace(/amount=\d+/, `amount=${remainingAmount}`);
+  }
+
+  return {
+    data: {
+      id: transaction.id,
+      code: transaction.code,
+      orderCode: transaction.orderCode,
+      status: transaction.status,
+      billingCycle: transaction.billingCycle,
+      amount,
+      paidAmount,
+      overpaidAmount,
+      remainingAmount,
+      totalRefundedAmount,
+      notes: transaction.notes,
+      transferContent: transaction.transferContent,
+      qrCodeUrl: responseQrCodeUrl,
+      bankCode: transaction.bankCode,
+      accountNo: transaction.accountNo,
+      accountHolder: transaction.accountHolder,
+      expiredAt: transaction.expiredAt,
+      paidAt: transaction.paidAt,
+      createdAt: transaction.createdAt,
+      paymentAccount: transaction.paymentAccount,
+      plan: transaction.plan,
+      refunds: transaction.refunds || []
+    },
+    message: 'Chi tiết đơn hàng giao dịch thanh toán'
+  };
+};
+
+/**
+ * 2b. Service: Lấy trạng thái giao dịch & Live Sync với PayOS API
+ */
+export const getTransactionStatusService = async (initialTransaction: any) => {
+  let transaction = initialTransaction;
+
+  // 1. Tự động cập nhật hết hạn nếu quá 24h mà vẫn PENDING
+  if (transaction.status === TRANSACTION_STATUS.PENDING && new Date() > new Date(transaction.expiredAt)) {
+    transaction = await prisma.paymentTransaction.update({
+      where: { id: transaction.id },
+      data: { status: TRANSACTION_STATUS.EXPIRED },
     });
   }
 
@@ -199,7 +320,6 @@ export const getTransactionStatusService = async (initialTransaction: any) => {
   const paidAmount = Number(transaction.paidAmount);
   const overpaidAmount = Math.max(0, paidAmount - amount);
   const remainingAmount = Math.max(0, amount - paidAmount);
-  const totalRefundedAmount = (transaction.refunds || []).reduce((acc: number, r: any) => acc + Number(r.amount), 0);
 
   let message = 'Trạng thái giao dịch thanh toán';
   switch (transaction.status) {
@@ -224,29 +344,10 @@ export const getTransactionStatusService = async (initialTransaction: any) => {
       break;
   }
 
-  let responseQrCodeUrl = transaction.qrCodeUrl;
-  if (transaction.status === TRANSACTION_STATUS.PARTIALLY_PAID && responseQrCodeUrl) {
-    responseQrCodeUrl = responseQrCodeUrl.replace(/amount=\d+/, `amount=${remainingAmount}`);
-  }
-
   return {
     data: {
-      id: transaction.id,
-      code: transaction.code,
       status: transaction.status,
-      amount,
       paidAmount,
-      overpaidAmount,
-      remainingAmount,
-      totalRefundedAmount,
-      notes: transaction.notes,
-      transferContent: transaction.transferContent,
-      qrCodeUrl: responseQrCodeUrl,
-      expiredAt: transaction.expiredAt,
-      paidAt: transaction.paidAt,
-      paymentAccount: transaction.paymentAccount,
-      plan: transaction.plan,
-      refunds: transaction.refunds || []
     },
     message
   };
