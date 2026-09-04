@@ -43,7 +43,7 @@ export const sendResetPasswordEmail = async ({
 }: SendResetPasswordEmailParams): Promise<boolean> => {
   const transporter = createTransporter();
   const fromEmail = process.env.EMAIL_FROM;
-  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+  const clientUrl = process.env.CLIENT_FE_URL;
   const logoUrl = process.env.APP_LOGO_URL || `${clientUrl}/logo.png`;
 
   if (!fromEmail) {
@@ -177,7 +177,7 @@ export const sendForgotPasswordOtpEmail = async ({
 }: SendForgotPasswordOtpEmailParams): Promise<boolean> => {
   const transporter = createTransporter();
   const fromEmail = process.env.EMAIL_FROM;
-  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+  const clientUrl = process.env.CLIENT_FE_URL;
   const logoUrl = process.env.APP_LOGO_URL || `${clientUrl}/logo.png`;
 
   if (!fromEmail) {

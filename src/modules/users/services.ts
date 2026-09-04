@@ -165,7 +165,7 @@ export async function resetPasswordService(user: { id: number; email: string; na
   });
 
   // Đường dẫn đăng nhập
-  const clientUrl = process.env.CLIENT_FE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+  const clientUrl = process.env.CLIENT_FE_URL;
   const loginUrl = `${clientUrl}/login`;
 
   // Gửi email thông tin mật khẩu mới cho người dùng

@@ -37,6 +37,11 @@ model User {
   approvedTransactions PaymentTransaction[] @relation("AdminApprovedTransactions")
   refunds             PaymentRefund[]      @relation("AdminRefunds")
   createdSubscriptions UserSubscription[]  @relation("AdminCreatedSubscriptions")
+  conversations        SupportConversation[] @relation("UserConversations")
+  assignedConversations SupportConversation[] @relation("AgentConversations")
+  createdTickets       SupportTicket[]       @relation("CreatedTickets")
+  assignedTickets      SupportTicket[]       @relation("AssignedTickets")
+  ticketComments       SupportTicketComment[]
 
   @@map("users")
 }
@@ -294,6 +299,124 @@ model PaymentMethod {
 
   @@map("payment_methods")
 }
+
+enum ConversationStatus {
+  BOT
+  WAITING_AGENT
+  AGENT_HANDLING
+  RESOLVED
+  CONVERTED_TO_TICKET
+}
+
+enum SenderType {
+  USER
+  BOT
+  AGENT
+  SYSTEM
+}
+
+enum TicketCategory {
+  PAYMENT
+  ACCOUNT
+  TECHNICAL
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_USER
+  RESOLVED
+  CLOSED
+}
+
+model SupportConversation {
+  id           Int                @id @default(autoincrement())
+  code         String             @unique @map("code") @db.VarChar(50)
+  userId       Int                @map("user_id")
+  assignedTo   Int?               @map("assigned_to")
+  status       ConversationStatus @default(WAITING_AGENT) @map("status")
+  lastMessage  String?            @map("last_message") @db.Text
+  lastSender   SenderType?        @map("last_sender")
+  closedAt     DateTime?          @map("closed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  user     User             @relation("UserConversations", fields: [userId], references: [id], onDelete: Cascade)
+  agent    User?            @relation("AgentConversations", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+  ticket   SupportTicket?
+
+  @@index([userId, status])
+  @@index([assignedTo, status])
+  @@map("support_conversations")
+}
+
+model SupportMessage {
+  id             Int                 @id @default(autoincrement())
+  conversationId Int                 @map("conversation_id")
+  senderType     SenderType          @map("sender_type")
+  senderId       Int?                @map("sender_id")
+  content        String              @map("content") @db.Text
+  metadata       Json?               @map("metadata")
+  attachments    Json?               @map("attachments")
+  isSystemNotice Boolean             @default(false) @map("is_system_notice")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("support_messages")
+}
+
+model SupportTicket {
+  id                   Int                  @id @default(autoincrement())
+  code                 String               @unique @map("code") @db.VarChar(50)
+  title                String               @map("title") @db.VarChar(255)
+  description          String               @map("description") @db.Text
+  category             TicketCategory       @default(OTHER) @map("category")
+  priority             TicketPriority       @default(MEDIUM) @map("priority")
+  status               TicketStatus         @default(OPEN) @map("status")
+  creatorId            Int                  @map("creator_id")
+  assigneeId           Int?                 @map("assignee_id")
+  sourceConversationId Int?                 @unique @map("source_conversation_id")
+  resolvedAt           DateTime?            @map("resolved_at")
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+
+  creator            User                  @relation("CreatedTickets", fields: [creatorId], references: [id], onDelete: Cascade)
+  assignee           User?                 @relation("AssignedTickets", fields: [assigneeId], references: [id], onDelete: SetNull)
+  sourceConversation SupportConversation?  @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
+  comments           SupportTicketComment[]
+
+  @@index([creatorId, status])
+  @@index([assigneeId, status])
+  @@index([category, priority, status])
+  @@map("support_tickets")
+}
+
+model SupportTicketComment {
+  id          Int           @id @default(autoincrement())
+  ticketId    Int           @map("ticket_id")
+  senderId    Int           @map("sender_id")
+  content     String        @map("content") @db.Text
+  attachments Json?         @map("attachments")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_comments")
+}
+
 
 
 

@@ -11,7 +11,6 @@ const app = express();
 const allowedOrigins = [
   process.env.CLIENT_FE_URL,
   process.env.ADMIN_FE_URL,
-  process.env.CLIENT_URL
 ].filter(Boolean) as string[];
 
 app.use(cors({
