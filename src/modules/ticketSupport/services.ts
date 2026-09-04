@@ -2,6 +2,8 @@ import prisma from '../../config/db';
 import { generateTicketCode } from './utils';
 import type { CreateTicketInput, UpdateTicketStatusInput, UpdateTicketInput, AddTicketCommentInput } from './zodSchemas';
 import type { TicketCategory, TicketPriority, TicketStatus } from '@prisma/client';
+import { notifyAllAdmins, createAndSendNotification } from '../notifications/services';
+import { io } from '../../config/socket/socketManager';
 
 export async function createTicket(userId: number, input: CreateTicketInput) {
   const code = generateTicketCode();
@@ -40,6 +42,21 @@ export async function createTicket(userId: number, input: CreateTicketInput) {
         attachments: input.attachments
       }
     });
+  }
+
+  // Trigger notification tới tất cả Admins
+  notifyAllAdmins({
+    title: 'Yêu cầu hỗ trợ mới',
+    content: `Khách hàng ${ticket.creator?.name} đã gửi yêu cầu hỗ trợ mới`,
+    type: 'TICKET_CREATED',
+    link: `admin/support`,
+    excludeUserId: userId
+  }).catch((err) => console.error('[Notification] Error in createTicket notifyAllAdmins:', err));
+
+  // Broadcast realtime socket event tới Admin & Creator
+  if (io) {
+    io.to('admin_agents').emit('ticket:created', ticket);
+    io.to(`user_${userId}`).emit('ticket:created', ticket);
   }
 
   return ticket;
@@ -167,7 +184,7 @@ export async function addTicketComment(
     }
   });
 
-  const ticket = await prisma.supportTicket.findUnique({ where: { id: ticketId }, select: { status: true } });
+  const ticket = await prisma.supportTicket.findUnique({ where: { id: ticketId }, select: { code: true, creatorId: true, status: true } });
 
   let nextStatus: TicketStatus = ticket?.status || 'OPEN';
   if (role === 'admin' && (ticket?.status === 'OPEN' || ticket?.status === 'PENDING_USER')) {
@@ -183,6 +200,36 @@ export async function addTicketComment(
       updatedAt: new Date()
     }
   });
+
+  // Trigger Notification
+  if (ticket) {
+    if (role === 'admin' && ticket.creatorId) {
+      createAndSendNotification({
+        userId: ticket.creatorId,
+        title: `Phản hồi mới cho Ticket #${ticket.code}`,
+        content: `Supporter vừa trả lời: "${input.content.slice(0, 80)}"`,
+        type: 'TICKET_REPLIED',
+        link: `/ticket-support?ticketId=${ticketId}`
+      }).catch((err) => console.error('[Notification] Error sending comment notification to user:', err));
+    } else if (role !== 'admin') {
+      notifyAllAdmins({
+        title: `Phản hồi từ khách hàng ở Ticket #${ticket.code}`,
+        content: `Khách hàng vừa phản hồi: "${input.content.slice(0, 80)}"`,
+        type: 'TICKET_REPLIED',
+        link: `/admin/ticket-support?ticketId=${ticketId}`,
+        excludeUserId: senderId
+      }).catch((err) => console.error('[Notification] Error sending comment notification to admins:', err));
+    }
+  }
+
+  // Broadcast realtime socket events
+  if (io) {
+    io.to(`ticket_${ticketId}`).emit('ticket:comment_added', comment);
+    io.to('admin_agents').emit('ticket:updated', { ticketId, status: nextStatus, comment });
+    if (ticket?.creatorId) {
+      io.to(`user_${ticket.creatorId}`).emit('ticket:updated', { ticketId, status: nextStatus, comment });
+    }
+  }
 
   return comment;
 }
@@ -217,6 +264,33 @@ export async function updateTicketStatus(ticketId: number, input: UpdateTicketSt
       }
     }
   });
+
+  // Trigger Notification tới Creator
+  if (updatedTicket && updatedTicket.creatorId) {
+    const statusMap: Record<string, string> = {
+      OPEN: 'Mở',
+      IN_PROGRESS: 'Đang xử lý',
+      PENDING_USER: 'Chờ phản hồi từ khách',
+      RESOLVED: 'Đã giải quyết',
+      CLOSED: 'Đã đóng'
+    };
+    createAndSendNotification({
+      userId: updatedTicket.creatorId,
+      title: `Trạng thái Ticket #${updatedTicket.code} đã cập nhật`,
+      content: `Trạng thái mới: ${statusMap[updatedTicket.status] || updatedTicket.status}`,
+      type: 'TICKET_STATUS_CHANGED',
+      link: `/ticket-support?ticketId=${ticketId}`
+    }).catch((err) => console.error('[Notification] Error sending status update notification:', err));
+  }
+
+  // Broadcast realtime socket events
+  if (io) {
+    io.to(`ticket_${ticketId}`).emit('ticket:status_changed', updatedTicket);
+    io.to('admin_agents').emit('ticket:updated', updatedTicket);
+    if (updatedTicket.creatorId) {
+      io.to(`user_${updatedTicket.creatorId}`).emit('ticket:updated', updatedTicket);
+    }
+  }
 
   return updatedTicket;
 }

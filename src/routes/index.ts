@@ -14,6 +14,7 @@ import paymentMethodRoutes from '../modules/paymentMethods/routes';
 import paymentRefundRoutes from '../modules/paymentRefunds/routes';
 import ticketSupportRoutes from '../modules/ticketSupport/routes';
 import chatSupportRoutes from '../modules/chatSupport/routes';
+import notificationRoutes from '../modules/notifications/routes';
 
 const apiRouter = express.Router();
 
@@ -33,6 +34,7 @@ apiRouter.use('/payment-methods', paymentMethodRoutes);
 apiRouter.use('/payment-refunds', paymentRefundRoutes);
 apiRouter.use('/support', ticketSupportRoutes);
 apiRouter.use('/support', chatSupportRoutes);
+apiRouter.use('/notifications', notificationRoutes);
 
 export default apiRouter;
 

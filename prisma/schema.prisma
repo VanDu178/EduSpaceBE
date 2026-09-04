@@ -42,6 +42,7 @@ model User {
   createdTickets       SupportTicket[]       @relation("CreatedTickets")
   assignedTickets      SupportTicket[]       @relation("AssignedTickets")
   ticketComments       SupportTicketComment[]
+  notifications        Notification[]
 
   @@map("users")
 }
@@ -415,6 +416,29 @@ model SupportTicketComment {
 
   @@index([ticketId, createdAt])
   @@map("support_ticket_comments")
+}
+
+enum NotificationType {
+  TICKET_CREATED
+  TICKET_REPLIED
+  TICKET_STATUS_CHANGED
+  SYSTEM
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int              @map("user_id")
+  title     String           @db.VarChar(255)
+  content   String           @db.Text
+  type      NotificationType @default(SYSTEM)
+  link      String?          @db.VarChar(500)
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
 }
 
 
