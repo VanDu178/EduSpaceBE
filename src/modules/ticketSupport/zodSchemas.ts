@@ -1,15 +1,32 @@
 import { z } from 'zod';
+import {
+  VALID_TICKET_CATEGORIES,
+  VALID_TICKET_PRIORITIES,
+  VALID_TICKET_STATUSES,
+  TICKET_CATEGORY,
+  TICKET_PRIORITY
+} from './constants';
 
-export const TicketCategoryEnum = z.enum(['PAYMENT', 'ACCOUNT', 'TECHNICAL', 'OTHER']);
-export const TicketPriorityEnum = z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']);
-export const TicketStatusEnum = z.enum(['OPEN', 'IN_PROGRESS', 'PENDING_USER', 'RESOLVED', 'CLOSED']);
+export const TicketCategoryEnum = z.enum(VALID_TICKET_CATEGORIES as [string, ...string[]]);
+export const TicketPriorityEnum = z.enum(VALID_TICKET_PRIORITIES as [string, ...string[]]);
+export const TicketStatusEnum = z.enum(VALID_TICKET_STATUSES as [string, ...string[]]);
 
 export const createTicketSchema = z.object({
-  title: z.string().min(5, 'Tiêu đề phải từ 5 ký tự trở lên').max(255, 'Tiêu đề không quá 255 ký tự'),
-  description: z.string().min(10, 'Mô tả phải chi tiết từ 10 ký tự trở lên'),
-  category: TicketCategoryEnum.default('OTHER'),
-  priority: TicketPriorityEnum.default('MEDIUM'),
+  title: z.string().min(1, 'Tiêu đề không được để trống').max(255, 'Tiêu đề không quá 255 ký tự'),
+  description: z.string().min(1, 'Mô tả không được để trống'),
+  category: TicketCategoryEnum.default(TICKET_CATEGORY.OTHER),
+  priority: TicketPriorityEnum.default(TICKET_PRIORITY.MEDIUM),
   attachments: z.array(z.string()).optional()
+});
+
+export const getTicketsQuerySchema = z.object({
+  status: z.string().optional(),
+  category: z.string().optional(),
+  priority: z.string().optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  cursor: z.coerce.number().int().positive().optional()
 });
 
 export const updateTicketStatusSchema = z.object({
@@ -22,12 +39,20 @@ export const updateTicketSchema = z.object({
   assigneeId: z.number().nullable().optional()
 });
 
-export const addTicketCommentSchema = z.object({
-  content: z.string().min(1, 'Nội dung phản hồi không được để trống'),
-  attachments: z.array(z.string()).optional()
-});
+export const addTicketCommentSchema = z
+  .object({
+    content: z.string().optional(),
+    attachments: z.array(z.string()).optional()
+  })
+  .refine(
+    (data) => (data.content && data.content.trim().length > 0) || (data.attachments && data.attachments.length > 0),
+    {
+      message: 'Phải có nội dung văn bản hoặc hình ảnh đính kèm'
+    }
+  );
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
+export type GetTicketsQueryInput = z.infer<typeof getTicketsQuerySchema>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 export type AddTicketCommentInput = z.infer<typeof addTicketCommentSchema>;

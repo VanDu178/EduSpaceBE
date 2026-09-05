@@ -4,6 +4,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import * as validation from './validation';
 import * as chatService from './services';
 import { getIO } from '../../config/socket/socketManager';
+import { CHAT_SOCKET_EVENTS } from './constants';
 
 export const startConversationHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId, input } = validation.validateStartConversation(req);
@@ -31,13 +32,13 @@ export const sendMessageHandler = asyncHandler(async (req: AuthenticatedRequest,
 
   try {
     const io = getIO();
-    io.to(`conversation_${input.conversationId}`).emit('new_message', {
+    io.to(`conversation_${input.conversationId}`).emit(CHAT_SOCKET_EVENTS.NEW_MESSAGE, {
       conversationId: input.conversationId,
       message
     });
 
     if (senderType === 'USER') {
-      io.to('admin_agents').emit('user_new_message_notice', {
+      io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.USER_NEW_MESSAGE_NOTICE, {
         conversationId: input.conversationId,
         user: req.user,
         message

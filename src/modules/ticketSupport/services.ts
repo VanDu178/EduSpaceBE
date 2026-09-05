@@ -1,87 +1,115 @@
 import prisma from '../../config/db';
 import { generateTicketCode } from './utils';
-import type { CreateTicketInput, UpdateTicketStatusInput, UpdateTicketInput, AddTicketCommentInput } from './zodSchemas';
+import type {
+  CreateTicketInput,
+  GetTicketsQueryInput,
+  UpdateTicketStatusInput,
+  UpdateTicketInput,
+  AddTicketCommentInput
+} from './zodSchemas';
 import type { TicketCategory, TicketPriority, TicketStatus } from '@prisma/client';
 import { notifyAllAdmins, createAndSendNotification } from '../notifications/services';
-import { io } from '../../config/socket/socketManager';
+import { NOTIFICATION_TYPE } from '../notifications/constants';
+import { getIO } from '../../config/socket/socketManager';
+import {
+  TICKET_STATUS,
+  TICKET_SOCKET_EVENTS,
+  TICKET_STATUS_LABELS,
+  TicketStatusType,
+  TICKET_LINKS
+} from './constants';
 
+/**
+ * 1. Service tạo mới Yêu cầu hỗ trợ (Ticket)
+ */
 export async function createTicket(userId: number, input: CreateTicketInput) {
-  const code = generateTicketCode();
-
+  // Hiện tại lấy 1 admin cố định để phân công
   const defaultAdmin = await prisma.user.findFirst({
     where: { role: 'admin', status: 'active' }
   });
 
-  const ticket = await prisma.supportTicket.create({
-    data: {
-      code,
-      title: input.title,
-      description: input.description,
-      category: input.category as TicketCategory,
-      priority: input.priority as TicketPriority,
-      status: 'OPEN',
-      creatorId: userId,
-      assigneeId: defaultAdmin?.id || null
-    },
-    include: {
-      creator: {
-        select: { id: true, name: true, email: true, avatarUrl: true }
-      },
-      assignee: {
-        select: { id: true, name: true, email: true, avatarUrl: true }
-      }
-    }
-  });
+  const ticket = await prisma.$transaction(async (tx) => {
+    const code = await generateTicketCode(tx);
 
-  if (input.attachments && input.attachments.length > 0) {
-    await prisma.supportTicketComment.create({
+    const createdTicket = await tx.supportTicket.create({
       data: {
-        ticketId: ticket.id,
-        senderId: userId,
-        content: 'Hình ảnh/Tệp đính kèm khi khởi tạo Ticket',
-        attachments: input.attachments
+        code,
+        title: input.title.trim(),
+        description: input.description.trim(),
+        category: input.category as TicketCategory,
+        priority: input.priority as TicketPriority,
+        status: TICKET_STATUS.OPEN,
+        creatorId: userId,
+        assigneeId: defaultAdmin?.id || null
+      },
+      include: {
+        creator: {
+          select: { id: true, name: true, email: true, avatarUrl: true }
+        },
+        assignee: {
+          select: { id: true, name: true, email: true, avatarUrl: true }
+        }
       }
     });
+
+    // Tạo comment khởi tạo nếu có đính kèm file/ảnh
+    if (input.attachments && input.attachments.length > 0) {
+      await tx.supportTicketComment.create({
+        data: {
+          ticketId: createdTicket.id,
+          senderId: userId,
+          content: 'Tệp đính kèm khi gửi yêu cầu hỗ trợ',
+          attachments: input.attachments
+        }
+      });
+    }
+
+    return createdTicket;
+  });
+
+  // Trigger Notification ĐÍCH DANH tới Admin phụ trách (nếu có)
+  if (ticket.assigneeId) {
+    createAndSendNotification({
+      userId: ticket.assigneeId,
+      title: 'Yêu cầu hỗ trợ mới được phân công',
+      content: `Khách hàng ${ticket.creator?.name || ''} đã gửi yêu cầu hỗ trợ mới #${ticket.code}`,
+      type: NOTIFICATION_TYPE.TICKET_CREATED,
+      link: TICKET_LINKS.ADMIN_SUPPORT,
+    }).catch((err) => console.error('[Notification] Error in createTicket createAndSendNotification:', err));
   }
 
-  // Trigger notification tới tất cả Admins
-  notifyAllAdmins({
-    title: 'Yêu cầu hỗ trợ mới',
-    content: `Khách hàng ${ticket.creator?.name} đã gửi yêu cầu hỗ trợ mới`,
-    type: 'TICKET_CREATED',
-    link: `admin/support`,
-    excludeUserId: userId
-  }).catch((err) => console.error('[Notification] Error in createTicket notifyAllAdmins:', err));
-
   // Broadcast realtime socket event tới Admin & Creator
-  if (io) {
-    io.to('admin_agents').emit('ticket:created', ticket);
-    io.to(`user_${userId}`).emit('ticket:created', ticket);
+  try {
+    const io = getIO();
+    if (io) {
+      io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.CREATED, ticket);
+      io.to(`user_${userId}`).emit(TICKET_SOCKET_EVENTS.CREATED, ticket);
+    }
+  } catch (err) {
+    console.error('[Socket] Broadcast create ticket error:', err);
   }
 
   return ticket;
 }
 
+/**
+ * 2. Service lấy danh sách Tickets kèm phân trang & lọc
+ */
 export async function getTickets(
   userId: number,
   role: string,
-  query: {
-    status?: string;
-    category?: string;
-    priority?: string;
-    search?: string;
-    page?: number;
-    limit?: number;
-  }
+  query: GetTicketsQueryInput
 ) {
   const page = Math.max(1, query.page || 1);
   const limit = Math.max(1, Math.min(100, query.limit || 20));
-  const skip = (page - 1) * limit;
 
   const whereCondition: any = {};
 
   if (role !== 'admin') {
     whereCondition.creatorId = userId;
+  } else {
+    // FE Admin: Chỉ load danh sách Ticket được phân công chính admin đó
+    whereCondition.assigneeId = userId;
   }
 
   if (query.status) {
@@ -95,13 +123,20 @@ export async function getTickets(
   }
   if (query.search) {
     whereCondition.OR = [
-      { code: { contains: query.search } },
-      { title: { contains: query.search } },
-      { description: { contains: query.search } }
+      { code: { contains: query.search, mode: 'insensitive' } },
+      { title: { contains: query.search, mode: 'insensitive' } },
+      { description: { contains: query.search, mode: 'insensitive' } }
     ];
   }
 
-  const [total, tickets] = await Promise.all([
+  if (query.cursor) {
+    whereCondition.id = { lt: query.cursor };
+  }
+
+  const useSkip = !query.cursor && page > 1;
+  const skip = useSkip ? (page - 1) * limit : undefined;
+
+  const [total, fetchedTickets] = await Promise.all([
     prisma.supportTicket.count({ where: whereCondition }),
     prisma.supportTicket.findMany({
       where: whereCondition,
@@ -116,11 +151,15 @@ export async function getTickets(
           select: { comments: true }
         }
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       skip,
-      take: limit
+      take: limit + 1
     })
   ]);
+
+  const hasMore = fetchedTickets.length > limit;
+  const tickets = hasMore ? fetchedTickets.slice(0, limit) : fetchedTickets;
+  const nextCursor = hasMore && tickets.length > 0 ? tickets[tickets.length - 1].id : null;
 
   return {
     tickets,
@@ -128,11 +167,16 @@ export async function getTickets(
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
+      nextCursor,
+      hasMore
     }
   };
 }
 
+/**
+ * 3. Service lấy chi tiết một Ticket theo ID
+ */
 export async function getTicketById(ticketId: number) {
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: ticketId },
@@ -164,6 +208,9 @@ export async function getTicketById(ticketId: number) {
   return ticket;
 }
 
+/**
+ * 4. Service thêm phản hồi (comment) vào Ticket
+ */
 export async function addTicketComment(
   ticketId: number,
   senderId: number,
@@ -174,7 +221,7 @@ export async function addTicketComment(
     data: {
       ticketId,
       senderId,
-      content: input.content,
+      content: input.content ? input.content.trim() : '',
       attachments: input.attachments ? input.attachments : undefined
     },
     include: {
@@ -184,13 +231,19 @@ export async function addTicketComment(
     }
   });
 
-  const ticket = await prisma.supportTicket.findUnique({ where: { id: ticketId }, select: { code: true, creatorId: true, status: true } });
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    select: { id: true, title: true, code: true, creatorId: true, status: true, assigneeId: true }
+  });
 
-  let nextStatus: TicketStatus = ticket?.status || 'OPEN';
-  if (role === 'admin' && (ticket?.status === 'OPEN' || ticket?.status === 'PENDING_USER')) {
-    nextStatus = 'IN_PROGRESS';
-  } else if (role !== 'admin' && ticket?.status === 'PENDING_USER') {
-    nextStatus = 'IN_PROGRESS';
+  // Tự động chuyển trạng thái Ticket:
+  // - Nếu Admin trả lời khi đang OPEN hoặc PENDING_USER -> IN_PROGRESS
+  // - Nếu User phản hồi khi đang PENDING_USER hoặc RESOLVED -> IN_PROGRESS để Supporter xử lý tiếp
+  let nextStatus: TicketStatus = ticket?.status || TICKET_STATUS.OPEN;
+  if (role === 'admin' && (ticket?.status === TICKET_STATUS.OPEN || ticket?.status === TICKET_STATUS.PENDING_USER)) {
+    nextStatus = TICKET_STATUS.IN_PROGRESS;
+  } else if (role !== 'admin' && (ticket?.status === TICKET_STATUS.PENDING_USER || ticket?.status === TICKET_STATUS.RESOLVED)) {
+    nextStatus = TICKET_STATUS.IN_PROGRESS;
   }
 
   await prisma.supportTicket.update({
@@ -206,41 +259,67 @@ export async function addTicketComment(
     if (role === 'admin' && ticket.creatorId) {
       createAndSendNotification({
         userId: ticket.creatorId,
-        title: `Phản hồi mới cho Ticket #${ticket.code}`,
-        content: `Supporter vừa trả lời: "${input.content.slice(0, 80)}"`,
-        type: 'TICKET_REPLIED',
-        link: `/ticket-support?ticketId=${ticketId}`
+        title: `Phản hồi mới cho yêu cầu hỗ trợ ${ticket.title}`,
+        content: `Bộ phận CSKH vừa trả lời: "${input?.content?.slice(0, 80)}"`,
+        type: NOTIFICATION_TYPE.TICKET_REPLIED,
+        link: TICKET_LINKS.CUSTOMER_SUPPORT
       }).catch((err) => console.error('[Notification] Error sending comment notification to user:', err));
     } else if (role !== 'admin') {
-      notifyAllAdmins({
-        title: `Phản hồi từ khách hàng ở Ticket #${ticket.code}`,
-        content: `Khách hàng vừa phản hồi: "${input.content.slice(0, 80)}"`,
-        type: 'TICKET_REPLIED',
-        link: `/admin/ticket-support?ticketId=${ticketId}`,
-        excludeUserId: senderId
-      }).catch((err) => console.error('[Notification] Error sending comment notification to admins:', err));
+      if (ticket.assigneeId) {
+        createAndSendNotification({
+          userId: ticket.assigneeId,
+          title: `Phản hồi từ khách hàng ở yêu cầu hỗ trợ ${ticket.code}`,
+          content: `Khách hàng vừa phản hồi: "${input?.content?.slice(0, 80)}"`,
+          type: NOTIFICATION_TYPE.TICKET_REPLIED,
+          link: TICKET_LINKS.ADMIN_SUPPORT
+        }).catch((err) => console.error('[Notification] Error sending comment notification to assignee admin:', err));
+      } else {
+        notifyAllAdmins({
+          title: `Phản hồi từ khách hàng ở yêu cầu hỗ trợ ${ticket.code}`,
+          content: `Khách hàng vừa phản hồi: "${input?.content?.slice(0, 80)}"`,
+          type: NOTIFICATION_TYPE.TICKET_REPLIED,
+          link: TICKET_LINKS.ADMIN_SUPPORT,
+          excludeUserId: senderId
+        }).catch((err) => console.error('[Notification] Error sending comment notification to admins:', err));
+      }
     }
   }
 
-  // Broadcast realtime socket events
-  if (io) {
-    io.to(`ticket_${ticketId}`).emit('ticket:comment_added', comment);
-    io.to('admin_agents').emit('ticket:updated', { ticketId, status: nextStatus, comment });
-    if (ticket?.creatorId) {
-      io.to(`user_${ticket.creatorId}`).emit('ticket:updated', { ticketId, status: nextStatus, comment });
+  // Broadcast Realtime Socket Events bằng HẰNG SỐ CHUẨN
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(`ticket_${ticketId}`).emit(TICKET_SOCKET_EVENTS.COMMENT_ADDED, {
+        ticketId,
+        comment
+      });
+      io.to(`ticket_${ticketId}`).emit(TICKET_SOCKET_EVENTS.STATUS_CHANGED, {
+        ticketId,
+        status: nextStatus
+      });
+      io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.UPDATED, { ticketId, status: nextStatus, comment });
+
+      if (ticket?.creatorId) {
+        io.to(`user_${ticket.creatorId}`).emit(TICKET_SOCKET_EVENTS.UPDATED, { ticketId, status: nextStatus, comment });
+      }
     }
+  } catch (err) {
+    console.error('[Socket] Broadcast add ticket comment error:', err);
   }
 
   return comment;
 }
 
+/**
+ * 5. Service cập nhật trạng thái của Ticket (Admin)
+ */
 export async function updateTicketStatus(ticketId: number, input: UpdateTicketStatusInput) {
   const updateData: any = {
     status: input.status as TicketStatus,
     updatedAt: new Date()
   };
 
-  if (input.status === 'RESOLVED' || input.status === 'CLOSED') {
+  if (input.status === TICKET_STATUS.RESOLVED || input.status === TICKET_STATUS.CLOSED) {
     updateData.resolvedAt = new Date();
   }
 
@@ -267,34 +346,36 @@ export async function updateTicketStatus(ticketId: number, input: UpdateTicketSt
 
   // Trigger Notification tới Creator
   if (updatedTicket && updatedTicket.creatorId) {
-    const statusMap: Record<string, string> = {
-      OPEN: 'Mở',
-      IN_PROGRESS: 'Đang xử lý',
-      PENDING_USER: 'Chờ phản hồi từ khách',
-      RESOLVED: 'Đã giải quyết',
-      CLOSED: 'Đã đóng'
-    };
+    const statusText = TICKET_STATUS_LABELS[updatedTicket.status as TicketStatusType] || updatedTicket.status;
     createAndSendNotification({
       userId: updatedTicket.creatorId,
-      title: `Trạng thái Ticket #${updatedTicket.code} đã cập nhật`,
-      content: `Trạng thái mới: ${statusMap[updatedTicket.status] || updatedTicket.status}`,
-      type: 'TICKET_STATUS_CHANGED',
-      link: `/ticket-support?ticketId=${ticketId}`
+      title: `Trạng thái Ticket #${updatedTicket.title} đã cập nhật`,
+      content: `Trạng thái mới: ${statusText}`,
+      type: NOTIFICATION_TYPE.TICKET_STATUS_CHANGED,
+      link: TICKET_LINKS.CUSTOMER_SUPPORT
     }).catch((err) => console.error('[Notification] Error sending status update notification:', err));
   }
 
-  // Broadcast realtime socket events
-  if (io) {
-    io.to(`ticket_${ticketId}`).emit('ticket:status_changed', updatedTicket);
-    io.to('admin_agents').emit('ticket:updated', updatedTicket);
-    if (updatedTicket.creatorId) {
-      io.to(`user_${updatedTicket.creatorId}`).emit('ticket:updated', updatedTicket);
+  // Broadcast Realtime Socket Events bằng HẰNG SỐ CHUẨN
+  try {
+    const io = getIO();
+    if (io && updatedTicket) {
+      io.to(`ticket_${ticketId}`).emit(TICKET_SOCKET_EVENTS.STATUS_CHANGED, updatedTicket);
+      io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.UPDATED, updatedTicket);
+      if (updatedTicket.creatorId) {
+        io.to(`user_${updatedTicket.creatorId}`).emit(TICKET_SOCKET_EVENTS.UPDATED, updatedTicket);
+      }
     }
+  } catch (err) {
+    console.error('[Socket] Broadcast update ticket status error:', err);
   }
 
   return updatedTicket;
 }
 
+/**
+ * 6. Service cập nhật thông tin chung của Ticket (Admin)
+ */
 export async function updateTicket(ticketId: number, input: UpdateTicketInput) {
   const updateData: any = {};
   if (input.priority) updateData.priority = input.priority as TicketPriority;
@@ -321,6 +402,15 @@ export async function updateTicket(ticketId: number, input: UpdateTicketInput) {
       }
     }
   });
+
+  try {
+    const io = getIO();
+    if (io && updatedTicket) {
+      io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.UPDATED, updatedTicket);
+    }
+  } catch (err) {
+    console.error('[Socket] Broadcast update ticket error:', err);
+  }
 
   return updatedTicket;
 }

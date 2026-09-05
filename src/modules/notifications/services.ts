@@ -1,5 +1,6 @@
 import prisma from '../../config/db';
 import { io } from '../../config/socket/socketManager';
+import { NOTIFICATION_TYPE, type NotificationType } from './constants';
 
 export async function getUserNotifications(userId: number, page: number = 1, limit: number = 20) {
   const skip = (page - 1) * limit;
@@ -51,7 +52,7 @@ export async function createAndSendNotification(data: {
   userId: number;
   title: string;
   content: string;
-  type?: 'TICKET_CREATED' | 'TICKET_REPLIED' | 'TICKET_STATUS_CHANGED' | 'SYSTEM';
+  type?: NotificationType;
   link?: string;
 }) {
   const notification = await prisma.notification.create({
@@ -59,7 +60,7 @@ export async function createAndSendNotification(data: {
       userId: data.userId,
       title: data.title,
       content: data.content,
-      type: data.type || 'SYSTEM',
+      type: data.type || NOTIFICATION_TYPE.SYSTEM,
       link: data.link,
     },
   });
@@ -81,7 +82,7 @@ export async function createAndSendNotification(data: {
 export async function notifyAllAdmins(data: {
   title: string;
   content: string;
-  type?: 'TICKET_CREATED' | 'TICKET_REPLIED' | 'TICKET_STATUS_CHANGED' | 'SYSTEM';
+  type?: NotificationType;
   link?: string;
   excludeUserId?: number;
 }) {

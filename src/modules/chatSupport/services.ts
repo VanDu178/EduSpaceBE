@@ -1,6 +1,8 @@
 import prisma from '../../config/db';
+import { getIO } from '../../config/socket/socketManager';
 import { generateTicketCode } from '../ticketSupport/utils';
-import { adminPresenceStore } from './constants';
+import { TICKET_SOCKET_EVENTS } from '../ticketSupport/constants';
+import { adminPresenceStore, CHAT_SOCKET_EVENTS } from './constants';
 import { generateConversationCode } from './utils';
 import type { ConvertChatToTicketInput } from './zodSchemas';
 import type { ConversationStatus, SenderType, TicketCategory, TicketPriority } from '@prisma/client';
@@ -142,8 +144,12 @@ export async function getConversations(role: string, userId: number, status?: st
 
   if (role !== 'admin') {
     whereCondition.userId = userId;
-  } else if (status) {
-    whereCondition.status = status as ConversationStatus;
+  } else {
+    // FE Admin: Chỉ hiển thị các cuộc trò chuyện của Admin đó phụ trách
+    whereCondition.assignedTo = userId;
+    if (status) {
+      whereCondition.status = status as ConversationStatus;
+    }
   }
 
   if (search && search.trim()) {
@@ -230,7 +236,6 @@ export async function convertChatToTicket(
   const conversation = await prisma.supportConversation.findUnique({
     where: { id: conversationId },
     include: {
-      messages: { orderBy: { createdAt: 'asc' } },
       user: true,
       ticket: true
     }
@@ -240,47 +245,79 @@ export async function convertChatToTicket(
     throw new Error('Không tìm thấy cuộc trò chuyện');
   }
 
-  const chatLogs = conversation.messages
-    .map((m) => `[${new Date(m.createdAt).toLocaleTimeString('vi-VN')}] ${m.senderType === 'USER' ? 'Khách hàng' : m.senderType === 'AGENT' ? 'Admin' : 'System'}: ${m.content}`)
-    .join('\n');
+  const cleanDescription = input.description?.trim() ? input.description.trim() : input.title.trim();
 
-  const fullDescription = `Mô tả từ Admin: ${input.title}\n\n--- LỊCH SỬ CHAT TRỰC TIẾP ---\n${chatLogs}`;
+  // Bọc tạo Ticket, cập nhật Conversation và tạo Message hệ thống trong 1 Atomic Transaction
+  const { ticket, systemMsg } = await prisma.$transaction(async (tx) => {
+    const ticketCode = await generateTicketCode(tx);
 
-  const ticketCode = generateTicketCode();
-  const ticket = await prisma.supportTicket.create({
-    data: {
-      code: ticketCode,
-      title: input.title,
-      description: fullDescription,
-      category: input.category as TicketCategory,
-      priority: input.priority as TicketPriority,
-      status: 'OPEN',
-      creatorId: conversation.userId,
-      assigneeId: adminId,
-      sourceConversationId: conversation.id
-    },
-    include: {
-      creator: { select: { id: true, name: true, email: true, avatarUrl: true } },
-      assignee: { select: { id: true, name: true, email: true, avatarUrl: true } }
+    const createdTicket = await tx.supportTicket.create({
+      data: {
+        code: ticketCode,
+        title: input.title.trim(),
+        description: cleanDescription,
+        category: input.category as TicketCategory,
+        priority: input.priority as TicketPriority,
+        status: 'OPEN',
+        creatorId: conversation.userId,
+        assigneeId: adminId,
+        sourceConversationId: conversation.id
+      },
+      include: {
+        creator: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        assignee: { select: { id: true, name: true, email: true, avatarUrl: true } }
+      }
+    });
+
+    if (input.attachments && input.attachments.length > 0) {
+      await tx.supportTicketComment.create({
+        data: {
+          ticketId: createdTicket.id,
+          senderId: adminId,
+          content: 'Tệp/Hình ảnh đính kèm khi chuyển từ Chat',
+          attachments: input.attachments
+        }
+      });
     }
+
+    await tx.supportConversation.update({
+      where: { id: conversationId },
+      data: {
+        status: 'CONVERTED_TO_TICKET',
+        closedAt: new Date()
+      }
+    });
+
+    const systemNotice = await tx.supportMessage.create({
+      data: {
+        conversationId,
+        senderType: 'SYSTEM',
+        content: `Cuộc trò chuyện này đã được chuyển thành yêu cầu hỗ trợ mã #${createdTicket.code}.`,
+        isSystemNotice: true
+      }
+    });
+
+    return { ticket: createdTicket, systemMsg: systemNotice };
   });
 
-  await prisma.supportConversation.update({
-    where: { id: conversationId },
-    data: {
-      status: 'CONVERTED_TO_TICKET',
-      closedAt: new Date()
+  // Bắn Socket Realtime thông báo cho phía Client & Admin
+  try {
+    const io = getIO();
+    if (io) {
+      const convertPayload = {
+        conversationId,
+        ticketId: ticket.id,
+        ticketCode: ticket.code,
+        status: 'CONVERTED_TO_TICKET'
+      };
+      io.to(`conversation_${conversationId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
+      io.to(`user_${conversation.userId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
+      io.to(`conversation_${conversationId}`).emit(CHAT_SOCKET_EVENTS.NEW_MESSAGE, { conversationId, message: systemMsg });
+      io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.CREATED, ticket);
     }
-  });
-
-  await prisma.supportMessage.create({
-    data: {
-      conversationId,
-      senderType: 'SYSTEM',
-      content: `Cuộc trò chuyện này đã được chuyển thành Yêu cầu hỗ trợ (Ticket) mã #${ticket.code}.`,
-      isSystemNotice: true
-    }
-  });
+  } catch (err) {
+    console.error('[Socket] Error broadcasting convertChatToTicket:', err);
+  }
 
   return ticket;
 }
@@ -322,23 +359,16 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
     where: {
       status: 'WAITING_AGENT',
       updatedAt: { lt: timeoutThreshold }
-    },
-    include: {
-      messages: { orderBy: { createdAt: 'asc' } }
     }
   });
 
   for (const conv of expiredConversations) {
-    const chatLogs = conv.messages
-      .map((m) => `[${m.senderType}]: ${m.content}`)
-      .join('\n');
-
-    const ticketCode = generateTicketCode();
+    const ticketCode = await generateTicketCode();
     const autoTicket = await prisma.supportTicket.create({
       data: {
         code: ticketCode,
         title: `Hỗ trợ tự động chuyển từ Chat - ${conv.code}`,
-        description: `Tự động tạo do thời gian chờ quá ${timeoutMinutes} phút.\n\n--- LỊCH SỬ CHAT ---\n${chatLogs}`,
+        description: `Tự động tạo do thời gian chờ quá ${timeoutMinutes} phút.`,
         category: 'OTHER',
         priority: 'HIGH',
         status: 'OPEN',
@@ -355,7 +385,7 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
       }
     });
 
-    await prisma.supportMessage.create({
+    const systemNoticeMsg = await prisma.supportMessage.create({
       data: {
         conversationId: conv.id,
         senderType: 'SYSTEM',
@@ -363,6 +393,25 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
         isSystemNotice: true
       }
     });
+
+    // Bắn Socket Realtime
+    try {
+      const io = getIO();
+      if (io) {
+        const convertPayload = {
+          conversationId: conv.id,
+          ticketId: autoTicket.id,
+          ticketCode: autoTicket.code,
+          status: 'CONVERTED_TO_TICKET'
+        };
+        io.to(`conversation_${conv.id}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
+        io.to(`user_${conv.userId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
+        io.to(`conversation_${conv.id}`).emit(CHAT_SOCKET_EVENTS.NEW_MESSAGE, { conversationId: conv.id, message: systemNoticeMsg });
+        io.to('admin_agents').emit(TICKET_SOCKET_EVENTS.CREATED, autoTicket);
+      }
+    } catch (err) {
+      console.error('[Socket] Error broadcasting autoEscalateTimeoutConversations:', err);
+    }
   }
 
   return expiredConversations.length;

@@ -19,9 +19,11 @@ export const sendMessageSchema = z.object({
 
 export const convertChatToTicketSchema = z.object({
   conversationId: z.number({ message: 'ID cuộc trò chuyện là bắt buộc' }),
-  title: z.string().min(5, 'Tiêu đề Ticket phải từ 5 ký tự trở lên'),
+  title: z.string().min(1, 'Tiêu đề Ticket không được để trống'),
+  description: z.string().optional(),
   category: TicketCategoryEnum.default('OTHER'),
-  priority: TicketPriorityEnum.default('HIGH')
+  priority: TicketPriorityEnum.default('HIGH'),
+  attachments: z.array(z.string()).optional()
 });
 
 export const setAdminStatusSchema = z.object({
