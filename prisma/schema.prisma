@@ -43,6 +43,7 @@ model User {
   assignedTickets      SupportTicket[]       @relation("AssignedTickets")
   ticketComments       SupportTicketComment[]
   notifications        Notification[]
+  videos               Video[]
 
   @@map("users")
 }
@@ -91,6 +92,44 @@ model Blog {
   creator  User?    @relation(fields: [createdBy], references: [id])
 
   @@map("blogs")
+}
+
+model VideoType {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  code        String   @unique @db.VarChar(50)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  videos Video[]
+
+  @@map("video_types")
+}
+
+model Video {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  code           String    @unique @map("code") @db.VarChar(50)
+  title          String    @db.VarChar(255)
+  slug           String    @unique @db.VarChar(255)
+  description    String?   @db.LongText
+  sourceType     String    @default("youtube") @map("source_type") @db.VarChar(50)
+  youtubeVideoId String?   @map("youtube_video_id") @db.VarChar(100)
+  storagePath    String?   @map("storage_path") @db.VarChar(500)
+  duration       Int       @default(0) @map("duration")
+  teaserDuration Int       @default(0) @map("teaser_duration")
+  thumbnailUrl   String?   @map("thumbnail_url") @db.LongText
+  isPremium      Boolean   @default(false) @map("is_premium")
+  status         String    @default("draft") @db.VarChar(30)
+  videoTypeId    Int       @map("video_type_id")
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  videoType VideoType @relation(fields: [videoTypeId], references: [id])
+  creator   User?     @relation(fields: [createdBy], references: [id])
+
+  @@map("videos")
 }
 
 enum BillingCycle {

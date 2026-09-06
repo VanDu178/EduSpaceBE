@@ -1,0 +1,99 @@
+/**
+ * TẦNG HÀM BỔ TRỢ & UTILITIES CHO MODULE VIDEOS
+ */
+
+/**
+ * Tạo slug chuẩn SEO từ tiêu đề tiếng Việt
+ */
+export function generateVideoSlug(title: string): string {
+  if (!title) return '';
+
+  let slug = title.toLowerCase();
+
+  // Đổi ký tự có dấu thành không dấu
+  slug = slug
+    .replace(/[áàảãạâấầẩẫậăắằẳẵặ]/g, 'a')
+    .replace(/[éèẻẽẹêếềểễệ]/g, 'e')
+    .replace(/[iíìỉĩị]/g, 'i')
+    .replace(/[óòỏõọôốồổỗộơớờởỡợ]/g, 'o')
+    .replace(/[úùủũụưứừửữự]/g, 'u')
+    .replace(/[ýỳỷỹỵ]/g, 'y')
+    .replace(/đ/g, 'd');
+
+  // Xóa các ký tự đặc biệt
+  slug = slug
+    .replace(/[^a-z0-9 -]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+  // Loại bỏ bớt dấu gạch ở đầu/cuối
+  return slug.replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Sinh mã Video tự động viết hoa (mặc định dạng VID-XXXXX)
+ */
+export function generateVideoCode(): string {
+  const randomStr = Math.floor(10000 + Math.random() * 90000).toString();
+  return `VID-${randomStr}`;
+}
+
+/**
+ * Trích xuất YouTube Video ID từ link full YouTube hoặc trả về chính chuỗi nếu đã là ID
+ * Ví dụ: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -> "dQw4w9WgXcQ"
+ * "https://youtu.be/dQw4w9WgXcQ" -> "dQw4w9WgXcQ"
+ */
+export function extractYoutubeVideoId(urlOrId: string | null | undefined): string | null {
+  if (!urlOrId) return null;
+  const trimmed = urlOrId.trim();
+
+  // Regex trích xuất ID YouTube chuẩn
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = trimmed.match(regExp);
+
+  if (match && match[2].length === 11) {
+    return match[2];
+  }
+
+  // Nếu dài đúng 11 ký tự không chứa slash, coi là ID đã được nhập sẵn
+  if (trimmed.length === 11 && !trimmed.includes('/')) {
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Gọi YouTube oEmbed API để kiểm tra tính tồn tại của YouTube Video ID và tự động lấy ảnh Thumbnail
+ */
+export async function fetchYoutubeMetadata(youtubeVideoId: string): Promise<{ isValid: boolean; thumbnailUrl: string | null; title?: string }> {
+  if (!youtubeVideoId || !/^[a-zA-Z0-9_-]{11}$/.test(youtubeVideoId)) {
+    return { isValid: false, thumbnailUrl: null };
+  }
+
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeVideoId}&format=json`;
+    const response = await fetch(oembedUrl);
+
+    if (!response.ok) {
+      return { isValid: false, thumbnailUrl: null };
+    }
+
+    const data: any = await response.json();
+    const thumbnailUrl = data.thumbnail_url || `https://img.youtube.com/vi/${youtubeVideoId}/hqdefault.jpg`;
+
+    return {
+      isValid: true,
+      thumbnailUrl,
+      title: data.title,
+    };
+  } catch (error) {
+    console.error('Lỗi khi kiểm tra YouTube Video ID:', error);
+    // Nếu fetch lỗi mạng nhưng ID có đúng 11 ký tự, có thể fallback lấy đường dẫn ảnh thumbnail chuẩn YouTube
+    return {
+      isValid: true,
+      thumbnailUrl: `https://img.youtube.com/vi/${youtubeVideoId}/hqdefault.jpg`,
+    };
+  }
+}
+

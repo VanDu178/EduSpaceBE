@@ -15,6 +15,7 @@ import paymentRefundRoutes from '../modules/paymentRefunds/routes';
 import ticketSupportRoutes from '../modules/ticketSupport/routes';
 import chatSupportRoutes from '../modules/chatSupport/routes';
 import notificationRoutes from '../modules/notifications/routes';
+import videoRoutes from '../modules/videos/routes';
 
 const apiRouter = express.Router();
 
@@ -22,6 +23,7 @@ const apiRouter = express.Router();
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/blogs', blogRoutes);
 apiRouter.use('/blog-types', blogTypeRoutes);
+apiRouter.use('/videos', videoRoutes);
 apiRouter.use('/users', userRoutes);
 apiRouter.use('/upload', uploadRoutes);
 apiRouter.use('/membership-plans', membershipPlanRoutes);

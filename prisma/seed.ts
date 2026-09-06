@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import { SYSTEM_FEATURE_CODES, SYSTEM_FEATURE_METADATA } from '../src/constants/featureCodes';
-import { PAYMENT_METHOD_CODES, DEFAULT_PAYMENT_METHODS } from '../src/constants/paymentMethodCodes';
+import { SYSTEM_FEATURE_CODES, SYSTEM_FEATURE_METADATA } from '../src/modules/features/constants';
+import { DEFAULT_PAYMENT_METHODS } from '../src/modules/paymentMethods/constants';
 
 const prisma = new PrismaClient();
 // ==========================================
@@ -126,6 +126,42 @@ async function seedVietqrBanks() {
   }
 }
 
+/**
+ * 4. Seed Fixed Video Types
+ */
+async function seedVideoTypes() {
+  const videoTypes = [
+    {
+      code: 'ACADEMY',
+      name: 'Học thuật',
+      description: 'Các video giảng dạy, bài học kiến thức chuẩn hóa',
+    },
+    {
+      code: 'MARKET_ANALYSIS',
+      name: 'Nhận định thị trường',
+      description: 'Các video phân tích xu hướng và tin tức thị trường',
+    },
+  ];
+
+  let count = 0;
+  for (const vt of videoTypes) {
+    await prisma.videoType.upsert({
+      where: { code: vt.code },
+      update: {
+        name: vt.name,
+        description: vt.description,
+      },
+      create: {
+        code: vt.code,
+        name: vt.name,
+        description: vt.description,
+      },
+    });
+    count++;
+  }
+  console.log(`Seeded/Updated ${count} video types.`);
+}
+
 // ==========================================
 // MAIN EXECUTION PIPELINE
 // ==========================================
@@ -140,6 +176,9 @@ async function main() {
 
   // 3. Seed VietQR Banks
   await seedVietqrBanks();
+
+  // 4. Seed Video Types
+  await seedVideoTypes();
 
   console.log('Database seeding completed successfully!');
 }

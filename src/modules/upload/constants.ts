@@ -4,7 +4,7 @@
 
 export const UPLOAD_CONFIG = {
   DEFAULT_FOLDER: 'blogs',
-  MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024, // 50MB (hỗ trợ cả video và ảnh dung lượng lớn)
+  MAX_FILE_SIZE_BYTES: 1024 * 1024 * 1024, // 1GB (hỗ trợ video bài giảng độ dài 1-2 tiếng)
   MAX_FILES_COUNT: 10, // Tối đa 10 file 1 lần upload
   SINGLE_FILE_FIELD_KEY: 'file',
   MULTIPLE_FILES_FIELD_KEY: 'files',
