@@ -23,15 +23,28 @@ import {
 } from './services';
 
 /**
- * Lấy danh sách tất cả các bài viết (Public).
+ * Lấy danh sách tất cả các bài viết (Public Client - chỉ bài viết published, loại bỏ content).
  */
 export const getBlogs = asyncHandler(async (req: Request, res: Response) => {
-  const validatedQuery = await validateGetBlogs(req);
+  const validatedQuery = await validateGetBlogs(req, true);
   const result = await getBlogsService(validatedQuery);
   return sendSuccess(
     res,
     result,
     'Lấy danh sách bài viết thành công'
+  );
+});
+
+/**
+ * Lấy danh sách bài viết dành cho Admin (Bảo mật - xem đủ các trạng thái, loại bỏ content).
+ */
+export const getAdminBlogs = asyncHandler(async (req: Request, res: Response) => {
+  const validatedQuery = await validateGetBlogs(req, false);
+  const result = await getBlogsService(validatedQuery);
+  return sendSuccess(
+    res,
+    result,
+    'Lấy danh sách bài viết cho Admin thành công'
   );
 });
 

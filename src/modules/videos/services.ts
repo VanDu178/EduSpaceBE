@@ -2,6 +2,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { AppError } from '../../utils/appError';
 import { deleteFromSupabase, extractStoragePath } from '../../services/supabaseStorageService';
 import { VIDEO_ERROR_CODES } from './constants';
+import { evaluateResourceAccess } from '../../services/resourceAccessEngine';
 
 const prisma = new PrismaClient();
 
@@ -56,12 +57,27 @@ export async function getVideosListService(queryData: any) {
       skip,
       take: limit,
       orderBy: { [sortBy]: sortOrder },
-      include: {
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        slug: true,
+        description: true,
+        sourceType: true,
+        duration: true,
+        teaserDuration: true,
+        thumbnailUrl: true,
+        isPremium: true,
+        status: true,
+        videoTypeId: true,
+        createdBy: true,
+        createdAt: true,
+        updatedAt: true,
         videoType: {
           select: { id: true, code: true, name: true },
         },
         creator: {
-          select: { id: true, name: true, email: true, avatarUrl: true },
+          select: { id: true, name: true, avatarUrl: true },
         },
       },
     }),
@@ -82,10 +98,51 @@ export async function getVideosListService(queryData: any) {
 }
 
 /**
- * 2. Service lấy chi tiết 1 Video theo ID
+ * 2. Service lấy chi tiết Video cho Admin theo ID (Đầy đủ thông tin)
  */
-export async function getVideoByIdService(existingVideo: any) {
-  return existingVideo;
+export async function getVideoByIdAdminService(existingVideo: any) {
+  return {
+    ...existingVideo,
+    hasFullAccess: true,
+  };
+}
+
+/**
+ * 3. Service lấy chi tiết Video cho Client theo ID (Dynamic Access Control & Policy Engine)
+ */
+export async function getVideoByClientService(existingVideo: any, user?: any) {
+  const result = await evaluateResourceAccess({
+    resourceType: 'video',
+    resource: existingVideo,
+    featureCode: 'video:watch_premium',
+    user,
+    behaviorOnDenied: 'teaser',
+  });
+
+  return result.data;
+}
+
+/**
+ * 4. Service lấy chi tiết Video cho Client theo Slug (Dynamic Access Control & Policy Engine)
+ */
+export async function getVideoBySlugService(slug: string, user?: any) {
+  const existingVideo = await prisma.video.findUnique({
+    where: { slug },
+    include: {
+      videoType: {
+        select: { id: true, code: true, name: true },
+      },
+      creator: {
+        select: { id: true, name: true, email: true, avatarUrl: true },
+      },
+    },
+  });
+
+  if (!existingVideo) {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
+  return getVideoByClientService(existingVideo, user);
 }
 
 /**

@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getBlogs,
+  getAdminBlogs,
   getBlogById,
   getBlogBySlug,
   createBlog,
@@ -14,7 +15,10 @@ import { adminMiddleware } from '../../middlewares/adminMiddleware';
 
 const router = express.Router();
 
-// Lấy danh sách các bài blog (Public)
+// Lấy danh sách các bài blog cho Admin (Protected Admin)
+router.get('/admin', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, getAdminBlogs as express.RequestHandler);
+
+// Lấy danh sách các bài blog (Public Client)
 router.get('/', getBlogs as express.RequestHandler);
 
 // Lấy chi tiết bài blog theo ID

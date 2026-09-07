@@ -7,7 +7,7 @@ import { BLOG_STATUS, VALID_BLOG_STATUSES, type BlogStatus } from './constants';
 /**
  * 1. Validate tham số query cho lấy danh sách bài viết.
  */
-export const validateGetBlogs = async (req: Request) => {
+export const validateGetBlogs = async (req: Request, isClient: boolean = false) => {
   const page = parseInt(req.query.page as string, 10) || 1;
   const limit = parseInt(req.query.limit as string, 10) || 10;
   const keyword = req.query.keyword as string;
@@ -31,7 +31,9 @@ export const validateGetBlogs = async (req: Request) => {
     };
   }
 
-  if (status && status !== BLOG_STATUS.ALL) {
+  if (isClient) {
+    where.status = BLOG_STATUS.PUBLISHED;
+  } else if (status && status !== BLOG_STATUS.ALL) {
     where.status = status;
   }
 

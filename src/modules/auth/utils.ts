@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { Role } from '@prisma/client';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import jwtConfig from '../../config/jwt';
@@ -22,11 +23,11 @@ export const generateAccessToken = (user: UserPayload): string => {
 
 /**
  * Sinh Refresh Token cho người dùng.
- * Payload chỉ chứa userId để tối ưu bảo mật.
+ * Payload chứa userId và mã UUID ngẫu nhiên (jti) để đảm bảo token sinh ra luôn duy nhất 100%.
  */
 export const generateRefreshToken = (user: UserPayload): string => {
   return jwt.sign(
-    { userId: user.id },                             // Chỉ đính kèm userId để tối ưu bảo mật
+    { userId: user.id, jti: crypto.randomUUID() },   // Mã UUID giúp tránh trùng chuỗi JWT khi gọi song song
     jwtConfig.refreshTokenSecret,                     // Dùng khóa bí mật Refresh Token để ký
     { expiresIn: jwtConfig.refreshTokenExpire } as SignOptions // Thời gian hết hạn (30 ngày)
   );

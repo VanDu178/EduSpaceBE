@@ -49,18 +49,18 @@ export const getUserWithSubscription = async (userId: number) => {
     planName,
     subscription: activeSub
       ? {
-          id: activeSub.id,
-          code: activeSub.code,
-          billingCycle: activeSub.billingCycle,
-          startDate: activeSub.startDate,
-          endDate: activeSub.endDate,
-          status: 'active',
-          plan: {
-            id: activeSub.plan.id,
-            code: activeSub.plan.code,
-            name: activeSub.plan.name,
-          }
+        id: activeSub.id,
+        code: activeSub.code,
+        billingCycle: activeSub.billingCycle,
+        startDate: activeSub.startDate,
+        endDate: activeSub.endDate,
+        status: 'active',
+        plan: {
+          id: activeSub.plan.id,
+          code: activeSub.plan.code,
+          name: activeSub.plan.name,
         }
+      }
       : null
   };
 };
@@ -116,3 +116,5 @@ export const authMiddleware = asyncHandler(
     next();
   }
 );
+
+

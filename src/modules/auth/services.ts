@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import prisma from '../../config/db';
+import { AppError } from '../../utils/appError';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -217,23 +218,32 @@ export const tokenRefreshService = async (savedToken: any, user: any) => {
   const newAccessToken = generateAccessToken(user);
   const newRefreshToken = generateRefreshToken(user);
 
-  await prisma.$transaction([
-    prisma.refreshToken.delete({
-      where: { id: savedToken.id },
-    }),
-    prisma.refreshToken.create({
-      data: {
-        token: newRefreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      },
-    }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.refreshToken.delete({
+        where: { id: savedToken.id },
+      }),
+      prisma.refreshToken.create({
+        data: {
+          token: newRefreshToken,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        },
+      }),
+    ]);
 
-  return {
-    newAccessToken,
-    newRefreshToken,
-  };
+    return {
+      newAccessToken,
+      newRefreshToken,
+    };
+  } catch (error: any) {
+    console.error('Lỗi khi thực hiện refresh token transaction:', error);
+    throw new AppError(
+      'Refresh token không hợp lệ hoặc phiên làm việc đã bị thay đổi.',
+      401,
+      'INVALID_REFRESH_TOKEN'
+    );
+  }
 };
 
 /**

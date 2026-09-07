@@ -20,19 +20,25 @@ const prisma = new PrismaClient();
 /**
  * 1. Validate tham số truy vấn danh sách Video
  */
-export async function validateGetVideosQuery(query: any) {
+export async function validateGetVideosQuery(query: any, isClient: boolean = false) {
   const result = queryVideoSchema.safeParse(query);
   if (!result.success) {
     const issue = result.error.issues[0];
     throw new AppError(issue.message, 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
   }
-  return result.data;
+
+  const validatedData = result.data;
+  if (isClient) {
+    validatedData.status = 'published';
+  }
+
+  return validatedData;
 }
 
 /**
- * 2. Validate lấy thông tin chi tiết 1 Video theo ID
+ * 2. Validate lấy chi tiết Video cho Admin theo ID
  */
-export async function validateGetVideoById(id: string) {
+export async function validateGetVideoByIdAdmin(id: string) {
   if (!id || typeof id !== 'string') {
     throw new AppError('ID video không hợp lệ', 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
   }
@@ -53,6 +59,43 @@ export async function validateGetVideoById(id: string) {
 
   return existingVideo;
 }
+
+/**
+ * 3. Validate lấy chi tiết Video cho Client theo ID
+ */
+export async function validateGetVideoByClient(id: string) {
+  if (!id || typeof id !== 'string') {
+    throw new AppError('ID video không hợp lệ', 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
+  }
+
+  const existingVideo = await prisma.video.findUnique({
+    where: { id },
+    include: {
+      videoType: true,
+      creator: {
+        select: { id: true, name: true, email: true, avatarUrl: true },
+      },
+    },
+  });
+
+  if (!existingVideo) {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
+  return existingVideo;
+}
+
+/**
+ * 4. Validate lấy chi tiết Video cho Client theo Slug
+ */
+export async function validateGetVideoBySlug(slug: string) {
+  if (!slug || typeof slug !== 'string') {
+    throw new AppError('Slug video không hợp lệ', 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
+  }
+
+  return slug;
+}
+
 
 /**
  * 3. Validate dữ liệu đầu vào khi tạo mới Video

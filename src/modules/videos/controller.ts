@@ -3,7 +3,9 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
 import {
   validateGetVideosQuery,
-  validateGetVideoById,
+  validateGetVideoByIdAdmin,
+  validateGetVideoByClient,
+  validateGetVideoBySlug,
   validateCreateVideo,
   validateUpdateVideo,
   validateUpdateVideoStatus,
@@ -12,7 +14,9 @@ import {
 } from './validation';
 import {
   getVideosListService,
-  getVideoByIdService,
+  getVideoByIdAdminService,
+  getVideoByClientService,
+  getVideoBySlugService,
   createVideoService,
   updateVideoService,
   updateVideoStatusService,
@@ -27,21 +31,48 @@ import {
  */
 
 /**
- * 1. Lấy danh sách Video (Có phân trang, lọc theo loại, nguồn, trạng thái, premium)
+ * 1. Lấy danh sách Video dành cho Client (Chỉ trạng thái published, loại bỏ videoUrl/storagePath/youtubeVideoId)
  */
 export const getVideosList = asyncHandler(async (req: Request, res: Response) => {
-  const validatedQuery = await validateGetVideosQuery(req.query);
+  const validatedQuery = await validateGetVideosQuery(req.query, true);
   const result = await getVideosListService(validatedQuery);
   return sendSuccess(res, result, 'Lấy danh sách video thành công');
 });
 
 /**
- * 2. Lấy chi tiết 1 Video theo ID
+ * 1b. Lấy danh sách Video dành cho Admin (Bảo mật - xem tất cả trạng thái, loại bỏ videoUrl/storagePath/youtubeVideoId)
  */
-export const getVideoById = asyncHandler(async (req: Request, res: Response) => {
-  const existingVideo = await validateGetVideoById(req.params.id as string);
-  const result = await getVideoByIdService(existingVideo);
+export const getAdminVideosList = asyncHandler(async (req: Request, res: Response) => {
+  const validatedQuery = await validateGetVideosQuery(req.query, false);
+  const result = await getVideosListService(validatedQuery);
+  return sendSuccess(res, result, 'Lấy danh sách video cho Admin thành công');
+});
+
+/**
+ * 2. Lấy chi tiết Video cho Admin theo ID (Bắt buộc đăng nhập Admin)
+ */
+export const getVideoByIdAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const existingVideo = await validateGetVideoByIdAdmin(req.params.id as string);
+  const result = await getVideoByIdAdminService(existingVideo);
   return sendSuccess(res, { video: result }, 'Lấy thông tin chi tiết video thành công');
+});
+
+/**
+ * 3. Lấy chi tiết Video cho Client theo ID (Dynamic Auth Check & Policy Engine)
+ */
+export const getVideoByClient = asyncHandler(async (req: Request, res: Response) => {
+  const existingVideo = await validateGetVideoByClient(req.params.id as string);
+  const result = await getVideoByClientService(existingVideo, (req as any).user);
+  return sendSuccess(res, { video: result }, 'Lấy thông tin chi tiết video thành công');
+});
+
+/**
+ * 4. Lấy chi tiết Video cho Client theo Slug (Dynamic Auth Check & Policy Engine)
+ */
+export const getVideoBySlug = asyncHandler(async (req: Request, res: Response) => {
+  const slug = await validateGetVideoBySlug(req.params.slug as string);
+  const result = await getVideoBySlugService(slug, (req as any).user);
+  return sendSuccess(res, { video: result }, 'Lấy thông tin chi tiết video theo Slug thành công');
 });
 
 /**

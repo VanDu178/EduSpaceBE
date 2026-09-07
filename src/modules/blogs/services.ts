@@ -20,13 +20,27 @@ export const getBlogsService = async (params: {
   const [blogs, total] = await Promise.all([
     prisma.blog.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        slug: true,
+        blogTypeId: true,
+        bannerUrl: true,
+        thumbnailUrl: true,
+        isPremium: true,
+        summary: true,
+        publishedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: true,
+        status: true,
         blogType: true,
         creator: {
           select: {
             id: true,
             name: true,
-            email: true
+            avatarUrl: true
           }
         }
       },
