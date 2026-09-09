@@ -1,8 +1,11 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { AppError } from '../../utils/appError';
 import { deleteFromSupabase, extractStoragePath } from '../../services/supabaseStorageService';
-import { VIDEO_ERROR_CODES } from './constants';
+import { VIDEO_ERROR_CODES, STREAM_ACCESS_LEVELS, StreamAccessLevel, SOURCE_TYPES } from './constants';
 import { evaluateResourceAccess } from '../../services/resourceAccessEngine';
+import { deleteBunnyVideo, getBunnyHlsUrl, getBunnyVideoDetails } from '../../services/bunnyStreamService';
+import { truncateHlsVariantPlaylist } from './utils';
+import { completeUploadSessionService } from '../upload/services';
 
 const prisma = new PrismaClient();
 
@@ -12,10 +15,92 @@ const prisma = new PrismaClient();
  */
 
 /**
- * 1. Service lấy danh sách Video có lọc, tìm kiếm và phân trang
+ * 1a. Service lấy danh sách Video dành cho Client (BẢO MẬT - Chỉ lấy video published, loại bỏ dữ liệu nhạy cảm)
  */
 export async function getVideosListService(queryData: any) {
-  const { page, limit, search, videoTypeId, sourceType, status, isPremium, sortBy, sortOrder } = queryData;
+  const { page, limit, search, videoTypeId, sourceType, isPremium, sortBy, sortOrder } = queryData;
+  const skip = (page - 1) * limit;
+
+  // Bắt buộc Client chỉ được xem danh sách video ở trạng thái 'published'
+  const where: Prisma.VideoWhereInput = {
+    status: 'published',
+  };
+
+  // Điều kiện tìm kiếm theo từ khóa (tiêu đề, mã code, slug)
+  if (search && search.trim() !== '') {
+    const keyword = search.trim();
+    where.OR = [
+      { title: { contains: keyword } },
+      { code: { contains: keyword } },
+      { slug: { contains: keyword } },
+    ];
+  }
+
+  // Điều kiện lọc theo Loại Video
+  if (videoTypeId) {
+    where.videoTypeId = videoTypeId;
+  }
+
+  // Điều kiện lọc theo Phân loại Nguồn (direct_upload / youtube)
+  if (sourceType) {
+    where.sourceType = sourceType;
+  }
+
+  // Điều kiện lọc theo chế độ Premium
+  if (typeof isPremium === 'boolean') {
+    where.isPremium = isPremium;
+  }
+
+  // Truy vấn song song dữ liệu và tổng số lượng bản ghi (Chỉ select thông tin công khai)
+  const [videos, total] = await Promise.all([
+    prisma.video.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { [sortBy]: sortOrder },
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        slug: true,
+        description: true,
+        sourceType: true,
+        duration: true,
+        teaserDuration: true,
+        thumbnailUrl: true,
+        isPremium: true,
+        videoTypeId: true,
+        createdAt: true,
+        updatedAt: true,
+        videoType: {
+          select: { id: true, code: true, name: true },
+        },
+        creator: {
+          select: { id: true, name: true, avatarUrl: true },
+        },
+      },
+    }),
+    prisma.video.count({ where }),
+  ]);
+
+  const totalPages = Math.ceil(total / limit);
+
+  return {
+    videos,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages,
+    },
+  };
+}
+
+/**
+ * 1b. Service lấy danh sách Video dành cho Admin (Đầy đủ thông tin cho Quản trị)
+ */
+export async function getAdminVideosListService(queryData: any) {
+  const { page, limit, search, videoTypeId, sourceType, status, processStatus, isPremium, sortBy, sortOrder } = queryData;
   const skip = (page - 1) * limit;
 
   const where: Prisma.VideoWhereInput = {};
@@ -45,12 +130,17 @@ export async function getVideosListService(queryData: any) {
     where.status = status;
   }
 
+  // Điều kiện lọc theo Trạng thái xử lý HLS (processing / ready / failed)
+  if (processStatus) {
+    where.processStatus = processStatus;
+  }
+
   // Điều kiện lọc theo chế độ Premium
   if (typeof isPremium === 'boolean') {
     where.isPremium = isPremium;
   }
 
-  // Truy vấn song song dữ liệu và tổng số lượng bản ghi
+  // Truy vấn song song dữ liệu và tổng số lượng bản ghi cho Admin (Đầy đủ thuộc tính)
   const [videos, total] = await Promise.all([
     prisma.video.findMany({
       where,
@@ -64,11 +154,14 @@ export async function getVideosListService(queryData: any) {
         slug: true,
         description: true,
         sourceType: true,
+        youtubeVideoId: true,
+        storagePath: true,
         duration: true,
         teaserDuration: true,
         thumbnailUrl: true,
         isPremium: true,
         status: true,
+        processStatus: true,
         videoTypeId: true,
         createdBy: true,
         createdAt: true,
@@ -145,13 +238,16 @@ export async function getVideoBySlugService(slug: string, user?: any) {
   return getVideoByClientService(existingVideo, user);
 }
 
-/**
- * 3. Service tạo mới Video
- */
 export async function createVideoService(validatedData: any) {
   try {
+    const isDirectWithStorage = validatedData.sourceType === SOURCE_TYPES.DIRECT_UPLOAD && validatedData.storagePath;
+    const finalData = {
+      ...validatedData,
+      processStatus: isDirectWithStorage ? 'processing' : (validatedData.processStatus || 'ready'),
+    };
+
     const newVideo = await prisma.video.create({
-      data: validatedData,
+      data: finalData,
       include: {
         videoType: {
           select: { id: true, code: true, name: true },
@@ -161,6 +257,10 @@ export async function createVideoService(validatedData: any) {
         },
       },
     });
+
+    if (newVideo.storagePath) {
+      await completeUploadSessionService(newVideo.storagePath);
+    }
 
     return newVideo;
   } catch (error: any) {
@@ -174,13 +274,34 @@ export async function createVideoService(validatedData: any) {
  */
 export async function updateVideoService(existingVideo: any, validatedData: any) {
   try {
-    // Nếu có cập nhật storagePath mới khác storagePath cũ, dọn dẹp file cũ trên Supabase Storage
-    if (
+    // Không cho phép thay đổi file video mới khi video đang trong tiến trình transcode ngầm
+    if (existingVideo.processStatus === 'processing' && validatedData.storagePath) {
+      throw new AppError(
+        'Video đang trong tiến trình xử lý HLS ngầm, không thể tải đè tệp video mới vào lúc này!',
+        400,
+        VIDEO_ERROR_CODES.PROCESSING
+      );
+    }
+
+    // Nếu chuyển sang nguồn YouTube hoặc tải đè storagePath mới, dọn dẹp tệp video cũ trên Bunny / Supabase
+    const isSwitchingToYoutube = validatedData.sourceType === SOURCE_TYPES.YOUTUBE && existingVideo.storagePath;
+    const isChangingStoragePath =
       validatedData.storagePath &&
       existingVideo.storagePath &&
-      validatedData.storagePath !== existingVideo.storagePath
-    ) {
-      await deleteFromSupabase(existingVideo.storagePath);
+      validatedData.storagePath !== existingVideo.storagePath;
+
+    if (isSwitchingToYoutube || isChangingStoragePath) {
+      const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (
+        existingVideo.storagePath.includes('bunny://') ||
+        existingVideo.storagePath.includes('b-cdn.net') ||
+        bunnyMatch
+      ) {
+        const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
+        await deleteBunnyVideo(videoId);
+      } else {
+        await deleteFromSupabase(existingVideo.storagePath);
+      }
     }
 
     // Nếu có cập nhật thumbnailUrl mới khác thumbnailUrl cũ, dọn dẹp file thumbnail cũ nếu thuộc Supabase Storage
@@ -195,9 +316,24 @@ export async function updateVideoService(existingVideo: any, validatedData: any)
       }
     }
 
+    const currentSourceType = validatedData.sourceType || existingVideo.sourceType;
+    const isNewVideoUploaded =
+      (isChangingStoragePath || (validatedData.storagePath && !existingVideo.storagePath)) &&
+      currentSourceType === SOURCE_TYPES.DIRECT_UPLOAD;
+
+    const finalData = {
+      ...validatedData,
+    };
+
+    if (isSwitchingToYoutube) {
+      finalData.processStatus = 'ready';
+    } else if (isNewVideoUploaded || (currentSourceType === SOURCE_TYPES.DIRECT_UPLOAD && validatedData.processStatus)) {
+      finalData.processStatus = validatedData.processStatus || 'processing';
+    }
+
     const updatedVideo = await prisma.video.update({
       where: { id: existingVideo.id },
-      data: validatedData,
+      data: finalData,
       include: {
         videoType: {
           select: { id: true, code: true, name: true },
@@ -208,8 +344,13 @@ export async function updateVideoService(existingVideo: any, validatedData: any)
       },
     });
 
+    if (updatedVideo.storagePath) {
+      await completeUploadSessionService(updatedVideo.storagePath);
+    }
+
     return updatedVideo;
   } catch (error: any) {
+    if (error instanceof AppError) throw error;
     console.error('Lỗi khi cập nhật Video:', error);
     throw new AppError('Cập nhật Video thất bại: ' + (error?.message || ''), 500, VIDEO_ERROR_CODES.UPDATE_FAILED);
   }
@@ -259,9 +400,28 @@ export async function updateVideoAccessService(id: string, isPremium: boolean, t
  */
 export async function deleteVideoService(existingVideo: any) {
   try {
-    // 1. Tự động dọn dẹp file video gốc trên Supabase nếu có
+    // Không cho phép xóa video khi đang trong tiến trình transcode ngầm
+    if (existingVideo.processStatus === 'processing') {
+      throw new AppError(
+        'Video đang trong tiến trình xử lý, không thể xóa vào lúc này. Vui lòng chờ hoàn tất!',
+        400,
+        VIDEO_ERROR_CODES.PROCESSING
+      );
+    }
+
+    // 1. Tự động dọn dẹp file video trên Bunny Stream hoặc Supabase
     if (existingVideo.storagePath) {
-      await deleteFromSupabase(existingVideo.storagePath);
+      const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (
+        existingVideo.storagePath.includes('bunny://') ||
+        existingVideo.storagePath.includes('b-cdn.net') ||
+        bunnyMatch
+      ) {
+        const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
+        await deleteBunnyVideo(videoId);
+      } else {
+        await deleteFromSupabase(existingVideo.storagePath);
+      }
     }
 
     // 2. Tự động dọn dẹp file thumbnail trên Supabase nếu có
@@ -279,10 +439,90 @@ export async function deleteVideoService(existingVideo: any) {
 
     return { id: existingVideo.id, code: existingVideo.code, title: existingVideo.title };
   } catch (error: any) {
+    if (error instanceof AppError) throw error;
     console.error('Lỗi khi xóa Video:', error);
     throw new AppError('Xóa Video thất bại: ' + (error?.message || ''), 500, VIDEO_ERROR_CODES.DELETE_FAILED);
   }
 }
+
+/**
+ * 8. Service xử lý Dynamic HLS Playlist (Master / Variant) & Phân quyền Teaser Năng Động
+ */
+export async function getDynamicHlsPlaylistService(
+  existingVideo: any,
+  variant?: string,
+  user?: any
+) {
+  // 0. Fallback Sync: Nếu video đang kẹt ở trạng thái 'processing', kiểm tra trực tiếp với Bunny REST API
+  if (existingVideo.processStatus === 'processing' && existingVideo.storagePath) {
+    const match = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (match) {
+      const details = await getBunnyVideoDetails(match[0]);
+      if (details && (details.status === 3 || details.encodeProgress === 100)) {
+        existingVideo.processStatus = 'ready';
+        await prisma.video.update({
+          where: { id: existingVideo.id },
+          data: { processStatus: 'ready' },
+        });
+        console.log(`[LIVE SYNC FALLBACK] Đã tự động chuyển Video ${existingVideo.id} sang 'ready' khi học viên phát HLS!`);
+      } else if (details && (details.status === 4 || details.status === 5)) {
+        existingVideo.processStatus = 'failed';
+        await prisma.video.update({
+          where: { id: existingVideo.id },
+          data: { processStatus: 'failed' },
+        });
+      }
+    }
+  }
+
+  // Kiểm tra lại trạng thái xử lý HLS của video
+  if (existingVideo.processStatus === 'processing') {
+    throw new AppError(
+      'Video đang trong tiến trình xử lý chất lượng cao, vui lòng thử lại sau ít phút!',
+      400,
+      VIDEO_ERROR_CODES.PROCESSING
+    );
+  }
+
+  if (existingVideo.processStatus === 'failed') {
+    throw new AppError(
+      'Video bị lỗi trong quá trình xử lý HLS, vui lòng tải lại tệp video khác!',
+      400,
+      VIDEO_ERROR_CODES.NOT_READY
+    );
+  }
+
+  // 1. Phân định quyền truy cập luồng phát (FULL vs TEASER)
+  let accessLevel: StreamAccessLevel = STREAM_ACCESS_LEVELS.TEASER;
+
+  if (!existingVideo.isPremium) {
+    accessLevel = STREAM_ACCESS_LEVELS.FULL;
+  } else if (user?.role === 'admin') {
+    accessLevel = STREAM_ACCESS_LEVELS.FULL;
+  } else if (user?.id) {
+    // Kiểm tra học viên có gói Subscription đang hoạt động không
+    const activeSub = await prisma.userSubscription.findFirst({
+      where: {
+        userId: user.id,
+        endDate: { gte: new Date() },
+      },
+    });
+
+    if (activeSub) {
+      accessLevel = STREAM_ACCESS_LEVELS.FULL;
+    }
+  }
+
+  // 2. Trả về luồng HLS trực tiếp từ Bunny Stream CDN
+  const playlistUrl = getBunnyHlsUrl(existingVideo.storagePath || existingVideo.id);
+
+  return {
+    content: playlistUrl,
+    playlistUrl,
+    accessLevel,
+  };
+}
+
 
 /* ==========================================
  * HELPER SERVICES
@@ -298,3 +538,56 @@ export async function getVideoTypesService() {
 
   return videoTypes;
 }
+
+/**
+ * Service đồng bộ thủ công hoặc theo yêu cầu trạng thái mã hóa HLS (processStatus) từ Bunny Stream REST API
+ */
+export async function syncVideoProcessStatusService(id: string) {
+  const existingVideo = await prisma.video.findUnique({
+    where: { id },
+  });
+
+  if (!existingVideo) {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
+  if (existingVideo.sourceType !== SOURCE_TYPES.DIRECT_UPLOAD || !existingVideo.storagePath) {
+    return existingVideo;
+  }
+
+  const match = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (!match) {
+    return existingVideo;
+  }
+
+  const videoDetails = await getBunnyVideoDetails(match[0]);
+  if (!videoDetails) {
+    return existingVideo;
+  }
+
+  let newProcessStatus: 'ready' | 'failed' | 'processing' | null = null;
+  if (videoDetails.status === 3 || videoDetails.encodeProgress === 100) {
+    newProcessStatus = 'ready';
+  } else if (videoDetails.status === 4 || videoDetails.status === 5) {
+    newProcessStatus = 'failed';
+  }
+
+  if (newProcessStatus && existingVideo.processStatus !== newProcessStatus) {
+    const updatedVideo = await prisma.video.update({
+      where: { id },
+      data: { processStatus: newProcessStatus },
+      include: {
+        videoType: {
+          select: { id: true, code: true, name: true },
+        },
+        creator: {
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+    return updatedVideo;
+  }
+
+  return existingVideo;
+}
+

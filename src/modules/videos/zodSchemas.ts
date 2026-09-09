@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SOURCE_TYPES, VIDEO_STATUS } from './constants';
+import { SOURCE_TYPES, VIDEO_STATUS, VIDEO_PROCESS_STATUS } from './constants';
 
 /**
  * TẦNG 1: Zod Schemas Kiểm Tra Cú Pháp & Định Dạng Đầu Vào (Videos)
@@ -7,6 +7,7 @@ import { SOURCE_TYPES, VIDEO_STATUS } from './constants';
 
 const sourceTypesTuple = [SOURCE_TYPES.DIRECT_UPLOAD, SOURCE_TYPES.YOUTUBE] as [string, ...string[]];
 const videoStatusTuple = [VIDEO_STATUS.DRAFT, VIDEO_STATUS.PUBLISHED, VIDEO_STATUS.ARCHIVED] as [string, ...string[]];
+const videoProcessStatusTuple = [VIDEO_PROCESS_STATUS.PROCESSING, VIDEO_PROCESS_STATUS.READY, VIDEO_PROCESS_STATUS.FAILED] as [string, ...string[]];
 
 // Schema tạo mới Video
 export const createVideoSchema = z.object({
@@ -79,6 +80,11 @@ export const updateVideoSchema = z.object({
       message: 'Trạng thái video không hợp lệ',
     })
     .optional(),
+  processStatus: z
+    .enum(videoProcessStatusTuple, {
+      message: 'Trạng thái xử lý video không hợp lệ',
+    })
+    .optional(),
   videoTypeId: z.coerce.number().int().positive().optional(),
 }).refine(
   (data) => {
@@ -114,6 +120,7 @@ export const queryVideoSchema = z.object({
   videoTypeId: z.coerce.number().int().positive().optional(),
   sourceType: z.enum(sourceTypesTuple).optional(),
   status: z.enum(videoStatusTuple).optional(),
+  processStatus: z.enum(videoProcessStatusTuple).optional(),
   isPremium: z
     .string()
     .transform((val) => (val === 'true' ? true : val === 'false' ? false : undefined))
@@ -122,6 +129,13 @@ export const queryVideoSchema = z.object({
   sortOrder: z.enum(['asc', 'desc'] as [string, ...string[]]).default('desc'),
 });
 
+// Schema yêu cầu Dynamic HLS Playlist
+export const getHlsPlaylistSchema = z.object({
+  identifier: z.string({ message: 'Mã định danh hoặc slug video là bắt buộc' }),
+  variant: z.string().optional(),
+});
+
 export type CreateVideoInput = z.infer<typeof createVideoSchema>;
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;
 export type QueryVideoInput = z.infer<typeof queryVideoSchema>;
+

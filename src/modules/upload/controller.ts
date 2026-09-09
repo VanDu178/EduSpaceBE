@@ -5,19 +5,15 @@ import {
   validateUploadSingleFileData,
   validateUploadMultipleFilesData,
   validateDeleteFileData,
-  validateInitR2MultipartData,
-  validateGetR2PresignedUrlsData,
-  validateCompleteR2MultipartData,
-  validateSingleR2PresignedData,
+  validateInitBunnyStreamData,
 } from './validation';
 import {
   uploadSingleFileService,
   uploadMultipleFilesService,
   deleteFileService,
-  initR2MultipartService,
-  getR2PresignedUrlsService,
-  completeR2MultipartService,
-  singleR2PresignedService,
+  initBunnyStreamSessionService,
+  deleteBunnyVideoService,
+  handleBunnyWebhookService,
 } from './services';
 
 /**
@@ -29,13 +25,8 @@ import {
  * Route: POST /api/v1/upload/single
  */
 export const uploadSingleFile = asyncHandler(async (req: Request, res: Response) => {
-  // Step 1 & 2: Validate dữ liệu đầu vào
   const { file, folder } = await validateUploadSingleFileData(req.file, req.body);
-
-  // Step 3: Gọi Service xử lý nghiệp vụ
   const result = await uploadSingleFileService(file, folder);
-
-  // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, result, 'Tải file lên hệ thống thành công!', 201);
 });
 
@@ -44,16 +35,11 @@ export const uploadSingleFile = asyncHandler(async (req: Request, res: Response)
  * Route: POST /api/v1/upload/multiple
  */
 export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Response) => {
-  // Step 1 & 2: Validate dữ liệu đầu vào
   const { files, folder } = await validateUploadMultipleFilesData(
     req.files as Express.Multer.File[],
     req.body
   );
-
-  // Step 3: Gọi Service xử lý nghiệp vụ
   const results = await uploadMultipleFilesService(files, folder);
-
-  // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, results, `Đã tải lên thành công ${results.length} file!`, 201);
 });
 
@@ -62,53 +48,38 @@ export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Respon
  * Route: DELETE /api/v1/upload
  */
 export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
-  // Step 1 & 2: Validate dữ liệu đầu vào
   const { filePath } = await validateDeleteFileData(req.body, req.query);
-
-  // Step 3: Gọi Service xử lý nghiệp vụ
   const result = await deleteFileService(filePath);
-
-  // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, result, 'Xóa tệp khỏi hệ thống thành công!');
 });
 
 /**
- * 4. Controller khởi tạo Cloudflare R2 Multipart Upload
- * Route: POST /api/v1/upload/r2/init-multipart
+ * 4. Controller khởi tạo phiên upload Bunny Stream
+ * Route: POST /api/v1/upload/bunny/create-session
  */
-export const initR2Multipart = asyncHandler(async (req: Request, res: Response) => {
-  const { key, fileType } = await validateInitR2MultipartData(req.body);
-  const result = await initR2MultipartService(key, fileType);
-  return sendSuccess(res, result, 'Khởi tạo Multipart Upload R2 thành công!', 201);
+export const initBunnyStreamSession = asyncHandler(async (req: Request, res: Response) => {
+  const { title } = await validateInitBunnyStreamData(req.body);
+  const userId = (req as any).user?.id ? Number((req as any).user.id) : undefined;
+  const result = await initBunnyStreamSessionService(title, userId);
+  return sendSuccess(res, result, 'Khởi tạo phiên upload Bunny Stream thành công!', 201);
 });
 
 /**
- * 5. Controller sinh danh sách Presigned URLs cho các Part trên R2
- * Route: POST /api/v1/upload/r2/presigned-urls
+ * 5. Controller dọn dẹp/xóa tệp video trên Bunny Stream
+ * Route: DELETE /api/v1/upload/bunny/:videoId
  */
-export const getR2PresignedUrls = asyncHandler(async (req: Request, res: Response) => {
-  const { key, uploadId, partsCount } = await validateGetR2PresignedUrlsData(req.body);
-  const result = await getR2PresignedUrlsService(key, uploadId, partsCount);
-  return sendSuccess(res, result, 'Lấy danh sách Presigned URLs R2 thành công!');
+export const deleteBunnyVideo = asyncHandler(async (req: Request, res: Response) => {
+  const videoId = String(req.params.videoId);
+  const result = await deleteBunnyVideoService(videoId);
+  return sendSuccess(res, result, 'Xóa tệp video trên Bunny Stream thành công!');
 });
 
 /**
- * 6. Controller hoàn tất ghép các Part (Complete Multipart Upload) trên R2
- * Route: POST /api/v1/upload/r2/complete-multipart
+ * 6. Controller xử lý Webhook thông báo từ Bunny Stream CDN
+ * Route: POST /api/v1/upload/bunny/webhook
  */
-export const completeR2Multipart = asyncHandler(async (req: Request, res: Response) => {
-  const { key, uploadId, parts } = await validateCompleteR2MultipartData(req.body);
-  const result = await completeR2MultipartService(key, uploadId, parts);
-  return sendSuccess(res, result, 'Hoàn tất Multipart Upload trên R2 thành công!');
-});
-
-/**
- * 7. Controller sinh Presigned PUT URL đơn lẻ cho Thumbnail trên R2
- * Route: POST /api/v1/upload/r2/single-presigned
- */
-export const singleR2Presigned = asyncHandler(async (req: Request, res: Response) => {
-  const { key, fileType } = await validateSingleR2PresignedData(req.body);
-  const result = await singleR2PresignedService(key, fileType);
-  return sendSuccess(res, result, 'Sinh Single Presigned URL R2 thành công!', 201);
+export const handleBunnyWebhook = asyncHandler(async (req: Request, res: Response) => {
+  const result = await handleBunnyWebhookService(req.body);
+  return sendSuccess(res, result, 'Xử lý Webhook Bunny Stream thành công!');
 });
 

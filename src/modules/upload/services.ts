@@ -1,10 +1,15 @@
+import { PrismaClient } from '@prisma/client';
 import { AppError } from '../../utils/appError';
 import { uploadToSupabase, deleteFromSupabase } from '../../services/supabaseStorageService';
+import { deleteBunnyVideo } from '../../services/bunnyStreamService';
 import { UPLOAD_ERROR_CODES } from './constants';
+import { getIO } from '../../config/socket/socketManager';
+import { VIDEO_SOCKET_EVENTS } from '../videos/constants';
+
+const prisma = new PrismaClient();
 
 /**
- * TẦNG 3: Xử lý nghiệp vụ & Giao tiếp Supabase Storage
- * Sắp xếp thứ tự 1-1 tương ứng với các handler function trong controller.ts
+ * TẦNG 3: Xử lý nghiệp vụ & Giao tiếp Supabase Storage / Bunny Stream
  */
 
 /**
@@ -52,51 +57,123 @@ export async function deleteFileService(filePath: string) {
 }
 
 /**
- * 4. Service khởi tạo Multipart Upload trên Cloudflare R2
+ * 4. Service khởi tạo phiên upload Bunny Stream và ghi vết UploadSession (PENDING)
  */
-export async function initR2MultipartService(key: string, fileType: string) {
-  const { initR2MultipartUpload } = await import('../../services/r2StorageService');
-  const result = await initR2MultipartUpload(key, fileType);
-  return result;
+export async function initBunnyStreamSessionService(title: string, userId?: number) {
+  const { createBunnyVideoSession } = await import('../../services/bunnyStreamService');
+  const session = await createBunnyVideoSession(title);
+
+  if (session?.videoId) {
+    try {
+      await prisma.uploadSession.create({
+        data: {
+          bunnyVideoId: session.videoId,
+          title,
+          userId: userId || null,
+          status: 'PENDING',
+        },
+      });
+    } catch (dbErr) {
+      console.warn('[UPLOAD SESSION] Không thể ghi vết phiên upload vào DB:', dbErr);
+    }
+  }
+
+  return session;
 }
 
 /**
- * 5. Service tạo danh sách Presigned URLs cho từng part tệp
+ * 5. Service xóa video khỏi Bunny Stream khi dọn dẹp hoặc rollback
  */
-export async function getR2PresignedUrlsService(
-  key: string,
-  uploadId: string,
-  partsCount: number
-) {
-  const { generateR2UploadPartPresignedUrls } = await import('../../services/r2StorageService');
-  const presignedUrls = await generateR2UploadPartPresignedUrls(key, uploadId, partsCount);
-  return {
-    key,
-    uploadId,
-    partsCount,
-    presignedUrls,
-  };
+export async function deleteBunnyVideoService(videoId: string) {
+  const success = await deleteBunnyVideo(videoId);
+  if (!success) {
+    throw new AppError('Xóa video trên Bunny Stream thất bại!', 500, UPLOAD_ERROR_CODES.DELETE_FAILED);
+  }
+
+  try {
+    await prisma.uploadSession.updateMany({
+      where: { bunnyVideoId: videoId },
+      data: { status: 'FAILED' },
+    });
+  } catch (dbErr) {
+    console.warn('[UPLOAD SESSION] Không thể cập nhật trạng thái FAILED:', dbErr);
+  }
+
+  return { videoId };
 }
 
 /**
- * 6. Service hoàn tất ghép các Part trên Cloudflare R2
+ * Service hoàn tất UploadSession khi Video được lưu thành công vào CSDL
  */
-export async function completeR2MultipartService(
-  key: string,
-  uploadId: string,
-  parts: Array<{ PartNumber: number; ETag: string }>
-) {
-  const { completeR2MultipartUpload } = await import('../../services/r2StorageService');
-  const result = await completeR2MultipartUpload(key, uploadId, parts);
-  return result;
+export async function completeUploadSessionService(storagePath: string) {
+  if (!storagePath) return;
+  const match = storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (match) {
+    const videoId = match[0];
+    try {
+      await prisma.uploadSession.updateMany({
+        where: { bunnyVideoId: videoId, status: 'PENDING' },
+        data: { status: 'COMPLETED' },
+      });
+    } catch (dbErr) {
+      console.warn('[UPLOAD SESSION] Không thể cập nhật trạng thái COMPLETED:', dbErr);
+    }
+  }
 }
 
 /**
- * 7. Service sinh Single Presigned PUT URL cho Thumbnail (hoặc file nhỏ)
+ * 6. Service tiếp nhận Webhook từ Bunny Stream để đồng bộ trạng thái mã hóa HLS (processStatus)
  */
-export async function singleR2PresignedService(key: string, fileType: string) {
-  const { generateR2SinglePresignedUrl } = await import('../../services/r2StorageService');
-  const result = await generateR2SinglePresignedUrl(key, fileType);
-  return result;
+export async function handleBunnyWebhookService(body: any) {
+  const videoId = body.VideoId || body.videoId || body.guid || body.VideoGuid;
+  const status = body.Status !== undefined ? body.Status : body.status;
+
+  if (!videoId) {
+    return { message: 'Bỏ qua Webhook: Không tìm thấy VideoId trong payload' };
+  }
+
+  const targetVideo = await prisma.video.findFirst({
+    where: {
+      storagePath: {
+        contains: videoId,
+      },
+    },
+  });
+
+  if (!targetVideo) {
+    return { message: `Bỏ qua Webhook: Không tìm thấy bản ghi Video với ID ${videoId} trong DB` };
+  }
+
+  let newProcessStatus: 'ready' | 'failed' | 'processing' | null = null;
+
+  if (status === 3) {
+    newProcessStatus = 'ready';
+  } else if (status === 4 || status === 5) {
+    newProcessStatus = 'failed';
+  } else if (status === 0 || status === 1 || status === 2) {
+    newProcessStatus = 'processing';
+  }
+
+  if (newProcessStatus && targetVideo.processStatus !== newProcessStatus) {
+    await prisma.video.update({
+      where: { id: targetVideo.id },
+      data: { processStatus: newProcessStatus },
+    });
+    console.log(`[BUNNY WEBHOOK] Đã cập nhật processStatus của Video ${targetVideo.id} (${targetVideo.title}) sang "${newProcessStatus}"`);
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.emit(VIDEO_SOCKET_EVENTS.PROCESS_STATUS_UPDATED, {
+          videoId: targetVideo.id,
+          processStatus: newProcessStatus,
+        });
+      }
+    } catch (sockErr) {
+      console.warn('[BUNNY WEBHOOK] Không thể phát sự kiện socket real-time:', sockErr);
+    }
+  }
+
+  return { videoId, status, processStatus: newProcessStatus };
 }
 

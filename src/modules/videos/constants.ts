@@ -24,7 +24,7 @@ export const VIDEO_TYPES = {
 
 export type VideoTypeCode = keyof typeof VIDEO_TYPES;
 
-// Trạng thái Video (status)
+// Trạng thái Hiển thị / Xuất bản Video (status)
 export const VIDEO_STATUS = {
   DRAFT: 'draft',
   PUBLISHED: 'published',
@@ -32,6 +32,15 @@ export const VIDEO_STATUS = {
 } as const;
 
 export type VideoStatus = (typeof VIDEO_STATUS)[keyof typeof VIDEO_STATUS];
+
+// Trạng thái Xử lý Media / Transcode HLS (processStatus)
+export const VIDEO_PROCESS_STATUS = {
+  PROCESSING: 'processing',
+  READY: 'ready',
+  FAILED: 'failed',
+} as const;
+
+export type VideoProcessStatus = (typeof VIDEO_PROCESS_STATUS)[keyof typeof VIDEO_PROCESS_STATUS];
 
 // Mã lỗi Module Video
 export const VIDEO_ERROR_CODES = {
@@ -44,4 +53,22 @@ export const VIDEO_ERROR_CODES = {
   UPDATE_FAILED: 'VIDEO_UPDATE_FAILED',
   DELETE_FAILED: 'VIDEO_DELETE_FAILED',
   VALIDATION_ERROR: 'VIDEO_VALIDATION_ERROR',
+  PROCESSING: 'VIDEO_PROCESSING',
+  NOT_READY: 'VIDEO_NOT_READY',
+  UNAUTHORIZED_STREAM: 'UNAUTHORIZED_STREAM_ACCESS',
 } as const;
+
+// Cấp độ quyền xem Video Stream
+export const STREAM_ACCESS_LEVELS = {
+  FULL: 'FULL',
+  TEASER: 'TEASER',
+} as const;
+
+export type StreamAccessLevel = (typeof STREAM_ACCESS_LEVELS)[keyof typeof STREAM_ACCESS_LEVELS];
+
+// Tên danh sách các Socket Event cho Module Videos
+export const VIDEO_SOCKET_EVENTS = {
+  PROCESS_STATUS_UPDATED: 'video:process_status_updated',
+} as const;
+
+

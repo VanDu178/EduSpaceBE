@@ -1,20 +1,15 @@
 import { AppError } from '../../utils/appError';
 import { extractStoragePath } from '../../services/supabaseStorageService';
-import { UPLOAD_ERROR_CODES, UPLOAD_CONFIG } from './constants';
+import { UPLOAD_ERROR_CODES } from './constants';
 import {
   uploadSingleBodySchema,
   uploadMultipleBodySchema,
   deleteFileQueryOrBodySchema,
-  initR2MultipartSchema,
-  getR2PresignedUrlsSchema,
-  completeR2MultipartSchema,
-  singleR2PresignedSchema,
+  initBunnyStreamSchema,
 } from './zodSchemas';
-
 
 /**
  * TẦNG 2: Kiểm tra tính hợp lệ dữ liệu và file upload
- * Sắp xếp thứ tự 1-1 tương ứng với các handler function trong controller.ts
  */
 
 /**
@@ -118,59 +113,13 @@ export async function validateDeleteFileData(body: any, query: any) {
 }
 
 /**
- * 4. Validate cho R2 Init Multipart Upload
+ * 4. Validate dữ liệu khởi tạo phiên upload Bunny Stream
  */
-export async function validateInitR2MultipartData(body: unknown) {
-  const parseResult = initR2MultipartSchema.safeParse(body);
+export async function validateInitBunnyStreamData(body: unknown) {
+  const parseResult = initBunnyStreamSchema.safeParse(body);
   if (!parseResult.success) {
     const firstIssue = parseResult.error.issues[0] as any;
-    const message = firstIssue?.message || 'Thông tin khởi tạo upload R2 không hợp lệ';
-    const errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
-    const statusCode = firstIssue?.params?.statusCode || 400;
-    throw new AppError(message, statusCode, errorCode);
-  }
-
-  const { fileName, fileType, fileSize, folderType } = parseResult.data;
-
-  // Kiểm tra kích thước giới hạn
-  if (folderType === 'videos' && fileSize > UPLOAD_CONFIG.MAX_FILE_SIZE_BYTES) {
-    throw new AppError(
-      'Dung lượng tệp video vượt quá giới hạn 1GB cho phép!',
-      400,
-      UPLOAD_ERROR_CODES.R2_FILE_TOO_LARGE
-    );
-  }
-
-  if (folderType === 'thumbnails' && fileSize > UPLOAD_CONFIG.MAX_THUMBNAIL_SIZE_BYTES) {
-    throw new AppError(
-      'Dung lượng tệp thumbnail vượt quá giới hạn 10MB cho phép!',
-      400,
-      UPLOAD_ERROR_CODES.R2_FILE_TOO_LARGE
-    );
-  }
-
-  const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const timestamp = Date.now();
-  const randomSuffix = Math.random().toString(36).substring(2, 8);
-  const key = `${folderType}/${timestamp}_${randomSuffix}_${cleanFileName}`;
-
-  return {
-    fileName,
-    fileType,
-    fileSize,
-    folderType,
-    key,
-  };
-}
-
-/**
- * 5. Validate cho R2 Get Presigned URLs
- */
-export async function validateGetR2PresignedUrlsData(body: unknown) {
-  const parseResult = getR2PresignedUrlsSchema.safeParse(body);
-  if (!parseResult.success) {
-    const firstIssue = parseResult.error.issues[0] as any;
-    const message = firstIssue?.message || 'Thông tin lấy presigned URLs R2 không hợp lệ';
+    const message = firstIssue?.message || 'Thông tin khởi tạo upload Bunny Stream không hợp lệ';
     const errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
     const statusCode = firstIssue?.params?.statusCode || 400;
     throw new AppError(message, statusCode, errorCode);
@@ -178,47 +127,3 @@ export async function validateGetR2PresignedUrlsData(body: unknown) {
 
   return parseResult.data;
 }
-
-/**
- * 6. Validate cho R2 Complete Multipart Upload
- */
-export async function validateCompleteR2MultipartData(body: unknown) {
-  const parseResult = completeR2MultipartSchema.safeParse(body);
-  if (!parseResult.success) {
-    const firstIssue = parseResult.error.issues[0] as any;
-    const message = firstIssue?.message || 'Thông tin hoàn tất multipart R2 không hợp lệ';
-    const errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
-    const statusCode = firstIssue?.params?.statusCode || 400;
-    throw new AppError(message, statusCode, errorCode);
-  }
-
-  return parseResult.data;
-}
-
-/**
- * 7. Validate cho R2 Single Presigned URL (Thumbnail)
- */
-export async function validateSingleR2PresignedData(body: unknown) {
-  const parseResult = singleR2PresignedSchema.safeParse(body);
-  if (!parseResult.success) {
-    const firstIssue = parseResult.error.issues[0] as any;
-    const message = firstIssue?.message || 'Thông tin lấy single presigned URL không hợp lệ';
-    const errorCode = firstIssue?.params?.errorCode || 'VALIDATION_ERROR';
-    const statusCode = firstIssue?.params?.statusCode || 400;
-    throw new AppError(message, statusCode, errorCode);
-  }
-
-  const { fileName, fileType, folderType } = parseResult.data;
-  const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const timestamp = Date.now();
-  const randomSuffix = Math.random().toString(36).substring(2, 8);
-  const key = `${folderType}/${timestamp}_${randomSuffix}_${cleanFileName}`;
-
-  return {
-    fileName,
-    fileType,
-    folderType,
-    key,
-  };
-}
-

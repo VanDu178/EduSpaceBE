@@ -44,6 +44,7 @@ model User {
   ticketComments       SupportTicketComment[]
   notifications        Notification[]
   videos               Video[]
+  uploadSessions       UploadSession[]
 
   @@map("users")
 }
@@ -121,6 +122,7 @@ model Video {
   thumbnailUrl   String?   @map("thumbnail_url") @db.LongText
   isPremium      Boolean   @default(false) @map("is_premium")
   status         String    @default("draft") @db.VarChar(30)
+  processStatus  String    @default("ready") @map("process_status") @db.VarChar(30)
   videoTypeId    Int       @map("video_type_id")
   createdBy      Int?      @map("created_by")
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -478,6 +480,21 @@ model Notification {
 
   @@index([userId, isRead, createdAt])
   @@map("notifications")
+}
+
+model UploadSession {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  bunnyVideoId String   @unique @map("bunny_video_id") @db.VarChar(100)
+  userId       Int?     @map("user_id")
+  status       String   @default("PENDING") @db.VarChar(30)
+  title        String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("upload_sessions")
 }
 
 

@@ -293,3 +293,37 @@ export async function validateDeleteVideo(id: string) {
   }
   return existingVideo;
 }
+
+/**
+ * 8. Validate yêu cầu Dynamic HLS Playlist (theo ID hoặc Slug)
+ */
+export async function validateGetHlsPlaylist(identifier: string, variant?: string, isSlug: boolean = false) {
+  if (!identifier || typeof identifier !== 'string') {
+    throw new AppError('Mã định danh video không hợp lệ', 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
+  }
+
+  const whereClause = isSlug ? { slug: identifier } : { id: identifier };
+  const existingVideo = await prisma.video.findUnique({
+    where: whereClause as any,
+  });
+
+  if (!existingVideo) {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
+  // Kiểm tra trạng thái transcode video
+  if (existingVideo.processStatus === 'processing') {
+    throw new AppError(
+      'Bài giảng đang được hệ thống xử lý luồng phát HLS Multi-bitrate (Vui lòng thử lại sau 1-2 phút)',
+      400,
+      VIDEO_ERROR_CODES.PROCESSING
+    );
+  }
+
+  if (existingVideo.processStatus !== 'ready' || !existingVideo.storagePath) {
+    throw new AppError('Video chưa sẵn sàng để phát HLS', 400, VIDEO_ERROR_CODES.NOT_READY);
+  }
+
+  return { existingVideo, variant };
+}
+

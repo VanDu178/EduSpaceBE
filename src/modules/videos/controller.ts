@@ -11,9 +11,11 @@ import {
   validateUpdateVideoStatus,
   validateUpdateVideoAccess,
   validateDeleteVideo,
+  validateGetHlsPlaylist,
 } from './validation';
 import {
   getVideosListService,
+  getAdminVideosListService,
   getVideoByIdAdminService,
   getVideoByClientService,
   getVideoBySlugService,
@@ -23,7 +25,10 @@ import {
   updateVideoAccessService,
   deleteVideoService,
   getVideoTypesService,
+  getDynamicHlsPlaylistService,
+  syncVideoProcessStatusService,
 } from './services';
+
 
 /**
  * TẦNG Thin Controller (Videos)
@@ -31,7 +36,7 @@ import {
  */
 
 /**
- * 1. Lấy danh sách Video dành cho Client (Chỉ trạng thái published, loại bỏ videoUrl/storagePath/youtubeVideoId)
+ * 1. Lấy danh sách Video dành cho Client (Chỉ trạng thái published, loại bỏ storagePath/youtubeVideoId/processStatus)
  */
 export const getVideosList = asyncHandler(async (req: Request, res: Response) => {
   const validatedQuery = await validateGetVideosQuery(req.query, true);
@@ -40,11 +45,11 @@ export const getVideosList = asyncHandler(async (req: Request, res: Response) =>
 });
 
 /**
- * 1b. Lấy danh sách Video dành cho Admin (Bảo mật - xem tất cả trạng thái, loại bỏ videoUrl/storagePath/youtubeVideoId)
+ * 1b. Lấy danh sách Video dành cho Admin (Đầy đủ thuộc tính quản trị)
  */
 export const getAdminVideosList = asyncHandler(async (req: Request, res: Response) => {
   const validatedQuery = await validateGetVideosQuery(req.query, false);
-  const result = await getVideosListService(validatedQuery);
+  const result = await getAdminVideosListService(validatedQuery);
   return sendSuccess(res, result, 'Lấy danh sách video cho Admin thành công');
 });
 
@@ -128,3 +133,54 @@ export const getVideoTypes = asyncHandler(async (_req: Request, res: Response) =
   const videoTypes = await getVideoTypesService();
   return sendSuccess(res, { videoTypes }, 'Lấy danh sách loại video thành công');
 });
+
+/**
+ * 9. Lấy Dynamic HLS Playlist theo ID Video
+ */
+export const getDynamicHlsPlaylist = asyncHandler(async (req: Request, res: Response) => {
+  const { existingVideo, variant } = await validateGetHlsPlaylist(
+    req.params.id as string,
+    req.params.variant as string,
+    false
+  );
+  const result = await getDynamicHlsPlaylistService(existingVideo, variant, (req as any).user);
+
+  if (result.playlistUrl && (result.playlistUrl.startsWith('http://') || result.playlistUrl.startsWith('https://'))) {
+    return res.redirect(302, result.playlistUrl);
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return res.send(result.content);
+});
+
+/**
+ * 10. Lấy Dynamic HLS Playlist theo Slug Video
+ */
+export const getDynamicHlsPlaylistBySlug = asyncHandler(async (req: Request, res: Response) => {
+  const { existingVideo, variant } = await validateGetHlsPlaylist(
+    req.params.slug as string,
+    req.params.variant as string,
+    true
+  );
+  const result = await getDynamicHlsPlaylistService(existingVideo, variant, (req as any).user);
+
+  if (result.playlistUrl && (result.playlistUrl.startsWith('http://') || result.playlistUrl.startsWith('https://'))) {
+    return res.redirect(302, result.playlistUrl);
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return res.send(result.content);
+});
+
+/**
+ * 11. Đồng bộ thủ công trạng thái xử lý HLS (processStatus) của Video từ Bunny Stream
+ */
+export const syncVideoProcessStatus = asyncHandler(async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const updatedVideo = await syncVideoProcessStatusService(id);
+  return sendSuccess(res, { video: updatedVideo }, 'Đồng bộ trạng thái xử lý video với Bunny Stream thành công');
+});
+
+

@@ -97,3 +97,54 @@ export async function fetchYoutubeMetadata(youtubeVideoId: string): Promise<{ is
   }
 }
 
+/**
+ * Cắt ngắn nội dung file HLS Variant Playlist (.m3u8) dựa theo thời lượng xem thử (teaserDuration - tính bằng giây)
+ */
+export function truncateHlsVariantPlaylist(
+  m3u8Content: string,
+  teaserDuration: number
+): string {
+  if (teaserDuration === undefined || teaserDuration === null || teaserDuration < 0) {
+    teaserDuration = 180;
+  }
+
+  const lines = m3u8Content.split('\n');
+  const resultLines: string[] = [];
+  let accumulatedDuration = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    if (line.startsWith('#EXTINF:')) {
+      const match = line.match(/#EXTINF:([\d.]+)/);
+      const segmentDuration = match ? parseFloat(match[1]) : 6.0;
+
+      if (accumulatedDuration + segmentDuration > teaserDuration) {
+        break;
+      }
+
+      accumulatedDuration += segmentDuration;
+      resultLines.push(line);
+
+      // Dòng tiếp theo trong HLS variant là tên file segment .ts
+      if (i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        if (nextLine && !nextLine.startsWith('#')) {
+          resultLines.push(nextLine);
+          i++;
+        }
+      }
+    } else if (line.startsWith('#EXT-X-ENDLIST')) {
+      continue;
+    } else {
+      resultLines.push(line);
+    }
+  }
+
+  // Luôn thêm #EXT-X-ENDLIST ở cuối
+  resultLines.push('#EXT-X-ENDLIST');
+  return resultLines.join('\n');
+}
+
+
