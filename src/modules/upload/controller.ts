@@ -5,11 +5,19 @@ import {
   validateUploadSingleFileData,
   validateUploadMultipleFilesData,
   validateDeleteFileData,
+  validateInitR2MultipartData,
+  validateGetR2PresignedUrlsData,
+  validateCompleteR2MultipartData,
+  validateSingleR2PresignedData,
 } from './validation';
 import {
   uploadSingleFileService,
   uploadMultipleFilesService,
   deleteFileService,
+  initR2MultipartService,
+  getR2PresignedUrlsService,
+  completeR2MultipartService,
+  singleR2PresignedService,
 } from './services';
 
 /**
@@ -63,3 +71,44 @@ export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
   // Step 4: Trả phản hồi về cho client
   return sendSuccess(res, result, 'Xóa tệp khỏi hệ thống thành công!');
 });
+
+/**
+ * 4. Controller khởi tạo Cloudflare R2 Multipart Upload
+ * Route: POST /api/v1/upload/r2/init-multipart
+ */
+export const initR2Multipart = asyncHandler(async (req: Request, res: Response) => {
+  const { key, fileType } = await validateInitR2MultipartData(req.body);
+  const result = await initR2MultipartService(key, fileType);
+  return sendSuccess(res, result, 'Khởi tạo Multipart Upload R2 thành công!', 201);
+});
+
+/**
+ * 5. Controller sinh danh sách Presigned URLs cho các Part trên R2
+ * Route: POST /api/v1/upload/r2/presigned-urls
+ */
+export const getR2PresignedUrls = asyncHandler(async (req: Request, res: Response) => {
+  const { key, uploadId, partsCount } = await validateGetR2PresignedUrlsData(req.body);
+  const result = await getR2PresignedUrlsService(key, uploadId, partsCount);
+  return sendSuccess(res, result, 'Lấy danh sách Presigned URLs R2 thành công!');
+});
+
+/**
+ * 6. Controller hoàn tất ghép các Part (Complete Multipart Upload) trên R2
+ * Route: POST /api/v1/upload/r2/complete-multipart
+ */
+export const completeR2Multipart = asyncHandler(async (req: Request, res: Response) => {
+  const { key, uploadId, parts } = await validateCompleteR2MultipartData(req.body);
+  const result = await completeR2MultipartService(key, uploadId, parts);
+  return sendSuccess(res, result, 'Hoàn tất Multipart Upload trên R2 thành công!');
+});
+
+/**
+ * 7. Controller sinh Presigned PUT URL đơn lẻ cho Thumbnail trên R2
+ * Route: POST /api/v1/upload/r2/single-presigned
+ */
+export const singleR2Presigned = asyncHandler(async (req: Request, res: Response) => {
+  const { key, fileType } = await validateSingleR2PresignedData(req.body);
+  const result = await singleR2PresignedService(key, fileType);
+  return sendSuccess(res, result, 'Sinh Single Presigned URL R2 thành công!', 201);
+});
+

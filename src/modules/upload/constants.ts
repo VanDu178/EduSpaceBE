@@ -5,13 +5,28 @@
 export const UPLOAD_CONFIG = {
   DEFAULT_FOLDER: 'blogs',
   MAX_FILE_SIZE_BYTES: 1024 * 1024 * 1024, // 1GB (hỗ trợ video bài giảng độ dài 1-2 tiếng)
+  MAX_THUMBNAIL_SIZE_BYTES: 10 * 1024 * 1024, // 10MB cho Thumbnail
   MAX_FILES_COUNT: 10, // Tối đa 10 file 1 lần upload
   SINGLE_FILE_FIELD_KEY: 'file',
   MULTIPLE_FILES_FIELD_KEY: 'files',
 } as const;
 
+export const R2_FOLDER_TYPES = {
+  VIDEO: 'videos',
+  THUMBNAIL: 'thumbnails',
+} as const;
+
+export type R2FolderType = typeof R2_FOLDER_TYPES[keyof typeof R2_FOLDER_TYPES];
+
 export const UPLOAD_ERROR_CODES = {
   FILE_REQUIRED: 'FILE_REQUIRED',
   INVALID_PATH: 'INVALID_PATH',
   DELETE_FAILED: 'DELETE_FAILED',
+  R2_CONFIG_MISSING: 'R2_CONFIG_MISSING',
+  R2_FILE_TOO_LARGE: 'R2_FILE_TOO_LARGE',
+  R2_INVALID_FOLDER: 'R2_INVALID_FOLDER',
+  R2_INIT_FAILED: 'R2_INIT_FAILED',
+  R2_PRESIGNED_FAILED: 'R2_PRESIGNED_FAILED',
+  R2_COMPLETE_FAILED: 'R2_COMPLETE_FAILED',
 } as const;
+

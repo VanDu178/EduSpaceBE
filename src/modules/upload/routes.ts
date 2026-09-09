@@ -1,7 +1,17 @@
 import express from 'express';
 import multer from 'multer';
 import { UPLOAD_CONFIG } from './constants';
-import { uploadSingleFile, uploadMultipleFiles, deleteFile } from './controller';
+import {
+  uploadSingleFile,
+  uploadMultipleFiles,
+  deleteFile,
+  initR2Multipart,
+  getR2PresignedUrls,
+  completeR2Multipart,
+  singleR2Presigned,
+} from './controller';
+import { authMiddleware } from '../../middlewares/authMiddleware';
+import { adminMiddleware } from '../../middlewares/adminMiddleware';
 
 /**
  * TẦNG ĐỊNH TUYẾN ENDPOINT HTTP & MIDDLEWARE
@@ -33,4 +43,13 @@ uploadRoutes.post(
 // Route xóa file
 uploadRoutes.delete('/', deleteFile);
 
+/**
+ * Các Route Upload dành riêng cho Cloudflare R2 Direct Upload (Admin Only)
+ */
+uploadRoutes.post('/r2/init-multipart', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, initR2Multipart as express.RequestHandler);
+uploadRoutes.post('/r2/presigned-urls', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, getR2PresignedUrls as express.RequestHandler);
+uploadRoutes.post('/r2/complete-multipart', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, completeR2Multipart as express.RequestHandler);
+uploadRoutes.post('/r2/single-presigned', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, singleR2Presigned as express.RequestHandler);
+
 export default uploadRoutes;
+
