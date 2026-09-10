@@ -29,15 +29,16 @@ export async function getUserNotifications(userId: number, page: number = 1, lim
 }
 
 export async function markNotificationAsRead(userId: number, notificationId?: number) {
+  const now = new Date();
   if (notificationId) {
     await prisma.notification.updateMany({
       where: { id: notificationId, userId },
-      data: { isRead: true },
+      data: { isRead: true, readAt: now },
     });
   } else {
     await prisma.notification.updateMany({
       where: { userId, isRead: false },
-      data: { isRead: true },
+      data: { isRead: true, readAt: now },
     });
   }
 

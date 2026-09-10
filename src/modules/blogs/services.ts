@@ -5,6 +5,7 @@ import { verifyAccessToken } from '../auth/utils';
 import { checkUserFeatureAccess } from '../../services/featureAccessService';
 import { generateBlogCode } from './utils';
 import { deleteFromSupabase, extractStoragePath } from '../../services/supabaseStorageService';
+import { BLOG_STATUS } from './constants';
 
 /**
  * 1. Lấy danh sách bài viết phân trang và lọc theo điều kiện.
@@ -70,27 +71,29 @@ export const getBlogsService = async (params: {
  * 2. Tạo bài viết mới.
  */
 export const createBlogService = async (blogData: any) => {
-  const blog = await prisma.blog.create({
-    data: blogData
-  });
+  return await prisma.$transaction(async (tx) => {
+    const blog = await tx.blog.create({
+      data: blogData
+    });
 
-  const code = generateBlogCode(blog.id);
-  const updatedBlog = await prisma.blog.update({
-    where: { id: blog.id },
-    data: { code },
-    include: {
-      blogType: true,
-      creator: {
-        select: {
-          id: true,
-          name: true,
-          email: true
+    const code = generateBlogCode(blog.id);
+    const updatedBlog = await tx.blog.update({
+      where: { id: blog.id },
+      data: { code },
+      include: {
+        blogType: true,
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
         }
       }
-    }
-  });
+    });
 
-  return updatedBlog;
+    return updatedBlog;
+  });
 };
 
 /**
@@ -219,7 +222,7 @@ export const getBlogByIdService = async (blogId: number) => {
 };
 
 /**
- * 7. Lấy chi tiết bài viết theo Slug (xử lý quyền truy cập Premium).
+ * 7. Lấy chi tiết bài viết theo Slug (xử lý quyền truy cập Premium và chống rò rỉ bài nháp).
  */
 export const getBlogBySlugService = async (params: {
   slugStr: string;
@@ -245,41 +248,51 @@ export const getBlogBySlugService = async (params: {
     throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
   }
 
+  // Giải mã Token để kiểm tra quyền Admin nếu cần
+  const authHeader = req.headers.authorization;
+  let userId: number | null = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = verifyAccessToken(token);
+      if (decoded && decoded.userId) {
+        userId = decoded.userId;
+      }
+    } catch (e) {
+      userId = null;
+    }
+  }
+
+  let isAdmin = false;
+  if (userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true }
+    });
+    if (user?.role === 'admin') {
+      isAdmin = true;
+    }
+  }
+
+  // Bảo vệ bài viết chưa xuất bản (Draft/Archived): chỉ Admin mới có quyền xem
+  if (blog.status !== BLOG_STATUS.PUBLISHED && !isAdmin) {
+    throw new AppError('Bài viết không tồn tại', 404, 'NOT_FOUND');
+  }
+
   let hasFullAccess = true;
 
   // Nếu là bài viết Premium, xác thực token và phân quyền truy cập
   if (blog.isPremium) {
     hasFullAccess = false;
-    const authHeader = req.headers.authorization;
-    let userId: number | null = null;
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      try {
-        const decoded = verifyAccessToken(token);
-        if (decoded && decoded.userId) {
-          userId = decoded.userId;
-        }
-      } catch (e) {
-        userId = null;
-      }
-    }
-
-    if (userId) {
-      // 1. Kiểm tra nếu là ADMIN
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { role: true }
-      });
-
-      if (user?.role === 'admin') {
+    if (isAdmin) {
+      hasFullAccess = true;
+    } else if (userId) {
+      // Kiểm tra tính năng blog:read_premium trong gói hội viên của người dùng
+      const { hasAccess } = await checkUserFeatureAccess(userId, 'blog:read_premium');
+      if (hasAccess) {
         hasFullAccess = true;
-      } else {
-        // 2. Kiểm tra tính năng blog:read_premium trong gói hội viên của người dùng
-        const { hasAccess } = await checkUserFeatureAccess(userId, 'blog:read_premium');
-        if (hasAccess) {
-          hasFullAccess = true;
-        }
       }
     }
   }
@@ -288,15 +301,21 @@ export const getBlogBySlugService = async (params: {
   let finalContent = blog.content;
 
   if (!hasFullAccess) {
-    // Tạo Teaser Content
+    // Tạo Teaser Content an toàn chống DOM HTML Corruption
     if (blog.content && blog.content.includes('<!--more-->')) {
       finalContent = blog.content.split('<!--more-->')[0];
     } else if (blog.content) {
       const pMatch = blog.content.match(/(<p[\s\S]*?<\/p>[\s\S]*?){1,2}/i);
       if (pMatch && pMatch[0]) {
         finalContent = pMatch[0];
-      } else if (blog.content.length > 350) {
-        finalContent = blog.content.slice(0, 350) + '...';
+      } else {
+        // Loại bỏ hoàn toàn các thẻ HTML rách nát trước khi cắt 350 ký tự
+        const plainText = blog.content.replace(/<[^>]*>/g, '').trim();
+        if (plainText.length > 350) {
+          finalContent = `<p>${plainText.slice(0, 350)}...</p>`;
+        } else {
+          finalContent = `<p>${plainText}</p>`;
+        }
       }
     } else if (blog.summary) {
       finalContent = `<p>${blog.summary}</p>`;

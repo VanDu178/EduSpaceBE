@@ -27,20 +27,20 @@ router.get('/id/:id', authMiddleware as express.RequestHandler, adminMiddleware 
 // Lấy chi tiết bài blog theo Slug (Dành cho Client)
 router.get('/slug/:slug', getBlogBySlug as express.RequestHandler);
 
-// Tạo mới bài blog (Protected)
-router.post('/', authMiddleware as express.RequestHandler, createBlog as express.RequestHandler);
+// Tạo mới bài blog (Protected Admin)
+router.post('/', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, createBlog as express.RequestHandler);
 
-// Cập nhật bài blog (Protected)
-router.put('/:id', authMiddleware as express.RequestHandler, updateBlog as express.RequestHandler);
+// Cập nhật bài blog (Protected Admin)
+router.put('/:id', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, updateBlog as express.RequestHandler);
 
-// Cập nhật trạng thái bài blog (Protected)
-router.patch('/:id/status', authMiddleware as express.RequestHandler, updateBlogStatus as express.RequestHandler);
+// Cập nhật trạng thái bài blog (Protected Admin)
+router.patch('/:id/status', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, updateBlogStatus as express.RequestHandler);
 
-// Cập nhật quyền truy cập bài blog (Protected)
-router.patch('/:id/access', authMiddleware as express.RequestHandler, updateBlogAccess as express.RequestHandler);
+// Cập nhật quyền truy cập bài blog (Protected Admin)
+router.patch('/:id/access', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, updateBlogAccess as express.RequestHandler);
 
-// Xóa bài blog (Protected)
-router.delete('/:id', authMiddleware as express.RequestHandler, deleteBlog as express.RequestHandler);
+// Xóa bài blog (Protected Admin)
+router.delete('/:id', authMiddleware as express.RequestHandler, adminMiddleware as express.RequestHandler, deleteBlog as express.RequestHandler);
 
 
 export default router;

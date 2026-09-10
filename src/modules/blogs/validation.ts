@@ -3,17 +3,47 @@ import prisma from '../../config/db';
 import { AppError } from '../../utils/appError';
 import { generateSlug } from './utils';
 import { BLOG_STATUS, VALID_BLOG_STATUSES, type BlogStatus } from './constants';
+import {
+  blogIdParamSchema,
+  blogSlugParamSchema,
+  getBlogsQuerySchema,
+  createBlogBodySchema,
+  updateBlogBodySchema,
+  updateBlogStatusBodySchema,
+  updateBlogAccessBodySchema
+} from './zodSchemas';
+
+/**
+ * Helper định dạng lỗi Zod thành object lỗi chi tiết
+ */
+const formatZodErrors = (error: any): Record<string, string[]> => {
+  const formattedErrors: Record<string, string[]> = {};
+  for (const issue of error.issues) {
+    const field = issue.path[0] ? String(issue.path[0]) : 'general';
+    if (!formattedErrors[field]) {
+      formattedErrors[field] = [];
+    }
+    formattedErrors[field].push(issue.message);
+  }
+  return formattedErrors;
+};
 
 /**
  * 1. Validate tham số query cho lấy danh sách bài viết.
  */
 export const validateGetBlogs = async (req: Request, isClient: boolean = false) => {
-  const page = parseInt(req.query.page as string, 10) || 1;
-  const limit = parseInt(req.query.limit as string, 10) || 10;
-  const keyword = req.query.keyword as string;
-  const blogType = req.query.blogType as string;
-  const status = req.query.status as string;
-  const isPremium = req.query.isPremium as string;
+  const parsedQuery = getBlogsQuerySchema.safeParse(req.query);
+  
+  if (!parsedQuery.success) {
+    throw new AppError(
+      'Tham số truy vấn danh sách bài viết không hợp lệ.',
+      400,
+      'VALIDATION_ERROR',
+      formatZodErrors(parsedQuery.error)
+    );
+  }
+
+  const { page, limit, keyword, blogType, status, isPremium } = parsedQuery.data;
 
   const where: any = {};
 
@@ -55,6 +85,18 @@ export const validateGetBlogs = async (req: Request, isClient: boolean = false) 
  * 2. Validate dữ liệu khi tạo bài viết mới.
  */
 export const validateCreateBlog = async (req: Request) => {
+  // Tầng 1: Validate bằng Zod Schema
+  const parsed = createBlogBodySchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new AppError(
+      'Dữ liệu tạo bài viết không hợp lệ.',
+      400,
+      'VALIDATION_ERROR',
+      formatZodErrors(parsed.error)
+    );
+  }
+
   const {
     title,
     slug: customSlug,
@@ -67,25 +109,7 @@ export const validateCreateBlog = async (req: Request) => {
     publishedAt,
     createdBy,
     status
-  } = req.body;
-
-  if (!title) {
-    throw new AppError(
-      'Tiêu đề bài viết là bắt buộc.',
-      400,
-      'VALIDATION_ERROR',
-      { title: ['Tiêu đề bài viết là bắt buộc.'] }
-    );
-  }
-
-  if (!blogTypeId) {
-    throw new AppError(
-      'Thể loại bài viết là bắt buộc.',
-      400,
-      'VALIDATION_ERROR',
-      { blogTypeId: ['Thể loại bài viết là bắt buộc.'] }
-    );
-  }
+  } = parsed.data;
 
   // Tạo slug từ customSlug hoặc tự sinh từ title
   let slug = customSlug ? generateSlug(customSlug) : generateSlug(title);
@@ -93,7 +117,7 @@ export const validateCreateBlog = async (req: Request) => {
     slug = `blog-${Date.now()}`;
   }
 
-  // Kiểm tra trùng lặp slug
+  // Tầng 2: Kiểm tra trùng lặp slug trong DB
   const existingSlug = await prisma.blog.findUnique({
     where: { slug }
   });
@@ -106,7 +130,7 @@ export const validateCreateBlog = async (req: Request) => {
 
   // Kiểm tra xem blogType có tồn tại hay không
   const blogType = await prisma.blogType.findUnique({
-    where: { id: Number(blogTypeId) }
+    where: { id: blogTypeId }
   });
 
   if (!blogType) {
@@ -140,8 +164,23 @@ export const validateCreateBlog = async (req: Request) => {
  * 3. Validate dữ liệu khi cập nhật bài viết.
  */
 export const validateUpdateBlog = async (req: Request) => {
-  const { id } = req.params;
-  const blogId = parseInt(id as string, 10);
+  // Tầng 1: Validate Param ID và Body bằng Zod Schemas
+  const paramParsed = blogIdParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
+    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
+  }
+
+  const bodyParsed = updateBlogBodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    throw new AppError(
+      'Dữ liệu cập nhật bài viết không hợp lệ.',
+      400,
+      'VALIDATION_ERROR',
+      formatZodErrors(bodyParsed.error)
+    );
+  }
+
+  const blogId = paramParsed.data.id;
   const {
     title,
     slug: customSlug,
@@ -154,13 +193,9 @@ export const validateUpdateBlog = async (req: Request) => {
     publishedAt,
     createdBy,
     status
-  } = req.body;
+  } = bodyParsed.data;
 
-  if (isNaN(blogId)) {
-    throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
-  }
-
-  // Kiểm tra xem bài viết có tồn tại không
+  // Tầng 2: Kiểm tra xem bài viết có tồn tại không
   const existingBlog = await prisma.blog.findUnique({
     where: { id: blogId }
   });
@@ -172,14 +207,6 @@ export const validateUpdateBlog = async (req: Request) => {
   const updateData: any = {};
 
   if (title !== undefined) {
-    if (!title) {
-      throw new AppError(
-        'Tiêu đề bài viết là bắt buộc.',
-        400,
-        'VALIDATION_ERROR',
-        { title: ['Tiêu đề bài viết là bắt buộc.'] }
-      );
-    }
     updateData.title = title;
   }
 
@@ -199,16 +226,8 @@ export const validateUpdateBlog = async (req: Request) => {
   }
 
   if (blogTypeId !== undefined) {
-    if (!blogTypeId) {
-      throw new AppError(
-        'Thể loại bài viết là bắt buộc.',
-        400,
-        'VALIDATION_ERROR',
-        { blogTypeId: ['Thể loại bài viết là bắt buộc.'] }
-      );
-    }
     const blogType = await prisma.blogType.findUnique({
-      where: { id: Number(blogTypeId) }
+      where: { id: blogTypeId }
     });
     if (!blogType) {
       throw new AppError(
@@ -246,14 +265,13 @@ export const validateUpdateBlog = async (req: Request) => {
  * 4. Validate trước khi xóa bài viết.
  */
 export const validateDeleteBlog = async (req: Request) => {
-  const { id } = req.params;
-  const blogId = parseInt(id as string, 10);
-
-  if (isNaN(blogId)) {
+  const paramParsed = blogIdParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
     throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  // Kiểm tra xem bài viết có tồn tại không
+  const blogId = paramParsed.data.id;
+
   const existingBlog = await prisma.blog.findUnique({
     where: { id: blogId }
   });
@@ -272,24 +290,24 @@ export const validateDeleteBlog = async (req: Request) => {
  * 5. Validate cập nhật trạng thái (status) bài viết.
  */
 export const validateUpdateBlogStatus = async (req: Request) => {
-  const { id } = req.params;
-  const blogId = parseInt(id as string, 10);
-  const { status } = req.body;
-
-  if (isNaN(blogId)) {
+  const paramParsed = blogIdParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
     throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  if (!status || typeof status !== 'string' || !VALID_BLOG_STATUSES.includes(status as BlogStatus)) {
+  const bodyParsed = updateBlogStatusBodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
     throw new AppError(
       'Trạng thái bài viết không hợp lệ.',
       400,
       'VALIDATION_ERROR',
-      { status: [`Trạng thái bài viết phải là một trong các giá trị: ${VALID_BLOG_STATUSES.join(', ')}.`] }
+      formatZodErrors(bodyParsed.error)
     );
   }
 
-  // Kiểm tra xem bài viết có tồn tại không
+  const blogId = paramParsed.data.id;
+  const { status } = bodyParsed.data;
+
   const existingBlog = await prisma.blog.findUnique({
     where: { id: blogId }
   });
@@ -313,52 +331,48 @@ export const validateUpdateBlogStatus = async (req: Request) => {
  * 6. Validate lấy chi tiết bài viết theo ID.
  */
 export const validateGetBlogById = async (req: Request) => {
-  const { id } = req.params;
-  const blogId = parseInt(id as string, 10);
-
-  if (isNaN(blogId) || blogId <= 0) {
+  const paramParsed = blogIdParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
     throw new AppError('ID bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  return { blogId };
+  return { blogId: paramParsed.data.id };
 };
 
 /**
  * 7. Validate lấy chi tiết bài viết theo Slug.
  */
 export const validateGetBlogBySlug = async (req: Request) => {
-  const { slug } = req.params;
-  const slugStr = slug as string;
-
-  if (!slugStr) {
+  const paramParsed = blogSlugParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
     throw new AppError('Slug bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  return { slugStr, req };
+  return { slugStr: paramParsed.data.slug, req };
 };
 
 /**
  * 8. Validate cập nhật quyền truy cập (isPremium) bài viết.
  */
 export const validateUpdateBlogAccess = async (req: Request) => {
-  const { id } = req.params;
-  const blogId = parseInt(id as string, 10);
-  const { isPremium } = req.body;
-
-  if (isNaN(blogId)) {
+  const paramParsed = blogIdParamSchema.safeParse(req.params);
+  if (!paramParsed.success) {
     throw new AppError('Bài viết không hợp lệ', 400, 'VALIDATION_ERROR');
   }
 
-  if (typeof isPremium !== 'boolean') {
+  const bodyParsed = updateBlogAccessBodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
     throw new AppError(
-      'Quyền truy cập là bắt buộc và phải là kiểu boolean.',
+      'Quyền truy cập không hợp lệ.',
       400,
       'VALIDATION_ERROR',
-      { isPremium: ['Quyền truy cập là bắt buộc.'] }
+      formatZodErrors(bodyParsed.error)
     );
   }
 
-  // Kiểm tra xem bài viết có tồn tại không
+  const blogId = paramParsed.data.id;
+  const { isPremium } = bodyParsed.data;
+
   const existingBlog = await prisma.blog.findUnique({
     where: { id: blogId }
   });

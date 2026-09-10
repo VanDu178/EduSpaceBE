@@ -26,8 +26,8 @@ export type CreateBlogTypeBodyInput = z.infer<typeof createBlogTypeBodySchema>;
  * Zod schema kiểm tra body khi cập nhật thể loại blog.
  */
 export const updateBlogTypeBodySchema = z.object({
-  name: z.string().trim().optional(),
-  code: z.string().trim().optional(),
+  name: z.string().trim().min(1, 'Tên thể loại không được để rỗng.').optional(),
+  code: z.string().trim().min(1, 'Mã thể loại không được để rỗng.').optional(),
   description: z.string().nullable().optional()
 });
 

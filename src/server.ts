@@ -3,6 +3,7 @@ import http from 'http';
 import app from './app';
 import { initSocketServer } from './config/socket/socketManager';
 import { initCleanupBunnyUploadsCron } from './cronJobs/cleanupBunnyUploadsJob';
+import { initCleanupReadNotificationsCron } from './cronJobs/cleanupReadNotificationsJob';
 
 // Đọc giá trị cổng PORT từ biến môi trường, mặc định là 5000.
 const PORT = process.env.PORT || 5000;
@@ -15,6 +16,9 @@ initSocketServer(server);
 
 // Khởi tạo Cronjob tự động dọn dẹp các tệp Video Bunny Stream mồ côi
 initCleanupBunnyUploadsCron();
+
+// Khởi tạo Cronjob tự động dọn dẹp các thông báo đã đọc > 15 ngày
+initCleanupReadNotificationsCron();
 
 // Khởi chạy server lắng nghe kết nối.
 server.listen(PORT, () => {
