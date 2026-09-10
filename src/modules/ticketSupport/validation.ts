@@ -14,7 +14,7 @@ import {
   UpdateTicketInput
 } from './zodSchemas';
 import { TICKET_STATUS } from './constants';
-import { checkTicketRateLimit } from './utils';
+import { checkTicketRateLimit, isValidStatusTransition } from './utils';
 
 function parseParamId(val: any): number {
   const str = Array.isArray(val) ? val[0] : String(val);
@@ -159,6 +159,16 @@ export async function validateUpdateTicketStatus(req: AuthenticatedRequest): Pro
 
   if (!ticket) {
     throw new AppError('Không tìm thấy Ticket', 404, 'NOT_FOUND');
+  }
+
+  if (!isValidStatusTransition(ticket.status, parseResult.data.status)) {
+    if (ticket.status === TICKET_STATUS.CLOSED) {
+      throw new AppError('Ticket đã ở trạng thái đã đóng, không thể chuyển đổi trạng thái.', 400, 'BAD_REQUEST');
+    }
+    if (ticket.status === TICKET_STATUS.RESOLVED) {
+      throw new AppError('Ticket đã ở trạng thái đã giải quyết, không thể chuyển về lại các trạng thái trước đó.', 400, 'BAD_REQUEST');
+    }
+    throw new AppError('Ticket đã rời trạng thái mới, không thể chuyển về lại trạng thái mới.', 400, 'BAD_REQUEST');
   }
 
   return { ticketId, input: parseResult.data };

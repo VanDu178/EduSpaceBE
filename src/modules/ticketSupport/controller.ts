@@ -36,9 +36,16 @@ export const getTicketsHandler = asyncHandler(async (req: AuthenticatedRequest, 
  */
 export const getTicketByIdHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { ticketId } = await validation.validateGetTicketById(req);
-  const ticket = await ticketService.getTicketById(ticketId);
+  const ticket = await ticketService.getTicketById(ticketId, req.user?.role);
 
   return sendSuccess(res, ticket, 'Lấy chi tiết Ticket thành công');
+});
+
+export const markTicketAsReadHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { ticketId } = await validation.validateGetTicketById(req);
+  await ticketService.markTicketAsRead(ticketId, req.user?.role || 'user');
+
+  return sendSuccess(res, null, 'Đã đánh dấu Ticket là đã đọc');
 });
 
 /**

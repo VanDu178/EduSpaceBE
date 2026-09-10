@@ -20,7 +20,7 @@ export interface CreateBunnyVideoResult {
 export function getBunnyConfig() {
   const libraryId = process.env.BUNNY_LIBRARY_ID || '';
   const apiKey = process.env.BUNNY_STREAM_API_KEY || '';
-  const cdnHostname = process.env.BUNNY_CDN_HOSTNAME || 'video-eduspace.b-cdn.net';
+  const cdnHostname = process.env.BUNNY_CDN_HOSTNAME || '';
   const webhookSecret = process.env.BUNNY_WEBHOOK_SECRET || '';
 
   return { libraryId, apiKey, cdnHostname, webhookSecret };

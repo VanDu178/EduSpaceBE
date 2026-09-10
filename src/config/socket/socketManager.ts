@@ -3,6 +3,7 @@ import type { Server as HttpServer } from 'http';
 import { verifyAccessToken } from '../../modules/auth/utils';
 import prisma from '../db';
 import { registerSupportSocketHandlers } from './handlers/supportSocketHandler';
+import { CHAT_SOCKET_EVENTS } from '../../modules/chatSupport/constants';
 
 export let io: SocketIOServer | null = null;
 
@@ -58,7 +59,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
     const activeAdminCount = adminRoom ? adminRoom.size : 0;
     const isOnline = activeAdminCount > 0;
 
-    io.emit('admin_presence_updated', {
+    io.emit(CHAT_SOCKET_EVENTS.ADMIN_PRESENCE_UPDATED, {
       isOnline,
       activeAdminCount
     });
@@ -94,7 +95,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
       const chatSupportService = await import('../../modules/chatSupport/services');
       const escalatedCount = await chatSupportService.autoEscalateTimeoutConversations(5);
       if (escalatedCount > 0 && io) {
-        io.to('admin_agents').emit('conversations_auto_escalated', { count: escalatedCount });
+        io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATIONS_AUTO_ESCALATED, { count: escalatedCount });
       }
     } catch (err) {
       console.error('[SocketManager] Auto escalation error:', err);

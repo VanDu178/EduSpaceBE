@@ -1,8 +1,10 @@
 import prisma from '../../config/db';
 import { getIO } from '../../config/socket/socketManager';
 import { generateTicketCode } from '../ticketSupport/utils';
-import { TICKET_SOCKET_EVENTS } from '../ticketSupport/constants';
-import { adminPresenceStore, CHAT_SOCKET_EVENTS } from './constants';
+import { TICKET_SOCKET_EVENTS, TICKET_LINKS } from '../ticketSupport/constants';
+import { adminPresenceStore, CHAT_SOCKET_EVENTS, CHAT_STATUS, SENDER_TYPE } from './constants';
+import { notifyAllAdmins } from '../notifications/services';
+import { NOTIFICATION_TYPE } from '../notifications/constants';
 import { generateConversationCode } from './utils';
 import type { ConvertChatToTicketInput } from './zodSchemas';
 import type { ConversationStatus, SenderType, TicketCategory, TicketPriority } from '@prisma/client';
@@ -11,7 +13,7 @@ export async function startConversation(userId: number, initialMessage?: string)
   let activeConversation = await prisma.supportConversation.findFirst({
     where: {
       userId,
-      status: { in: ['WAITING_AGENT', 'AGENT_HANDLING'] }
+      status: { in: [CHAT_STATUS.WAITING_AGENT, CHAT_STATUS.AGENT_HANDLING] }
     },
     include: {
       messages: {
@@ -27,7 +29,7 @@ export async function startConversation(userId: number, initialMessage?: string)
 
   if (activeConversation) {
     if (initialMessage) {
-      await sendMessage(activeConversation.id, 'USER', userId, initialMessage);
+      await sendMessage(activeConversation.id, SENDER_TYPE.USER, userId, initialMessage);
     }
 
     const updated = await prisma.supportConversation.findUnique({
@@ -64,9 +66,9 @@ export async function startConversation(userId: number, initialMessage?: string)
       code,
       userId,
       assignedTo: defaultAdmin?.id || null,
-      status: 'WAITING_AGENT',
+      status: CHAT_STATUS.WAITING_AGENT,
       lastMessage: initialMessage || 'Bắt đầu cuộc trò chuyện mới',
-      lastSender: 'USER'
+      lastSender: SENDER_TYPE.USER
     },
     include: {
       agent: {
@@ -79,7 +81,7 @@ export async function startConversation(userId: number, initialMessage?: string)
     await prisma.supportMessage.create({
       data: {
         conversationId: conversation.id,
-        senderType: 'USER',
+        senderType: SENDER_TYPE.USER,
         senderId: userId,
         content: initialMessage
       }
@@ -89,11 +91,31 @@ export async function startConversation(userId: number, initialMessage?: string)
   await prisma.supportMessage.create({
     data: {
       conversationId: conversation.id,
-      senderType: 'SYSTEM',
+      senderType: SENDER_TYPE.SYSTEM,
       content: 'Chào mừng bạn đến với TradeVerse! Yêu cầu hỗ trợ của bạn đã được chuyển đến nhân viên CSKH.',
       isSystemNotice: true
     }
   });
+
+  // Chỉ Trigger Notification đến Admin khi khách hàng THỰC SỰ gửi tin nhắn đầu tiên (tránh thông báo rác)
+  if (initialMessage && initialMessage.trim().length > 0) {
+    try {
+      const creator = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true }
+      });
+      const senderName = creator?.name || 'Khách hàng';
+
+      notifyAllAdmins({
+        title: 'Cuộc trò chuyện CSKH mới',
+        content: `${senderName} vừa gửi yêu cầu tư vấn mới: "${initialMessage.slice(0, 60)}"`,
+        type: NOTIFICATION_TYPE.SYSTEM,
+        link: `${TICKET_LINKS.ADMIN_SUPPORT}?tab=chat&chatId=${conversation.id}`
+      }).catch((err) => console.error('[Notification] Error sending new chat notification to admins:', err));
+    } catch (err) {
+      console.error('[Notification] Error in startConversation notifyAllAdmins:', err);
+    }
+  }
 
   const fullConversation = await prisma.supportConversation.findUnique({
     where: { id: conversation.id },
@@ -132,11 +154,43 @@ export async function sendMessage(
     data: {
       lastMessage: content || (attachments && attachments.length > 0 ? '[Hình ảnh]' : ''),
       lastSender: senderType,
+      agentUnreadCount: senderType === SENDER_TYPE.USER ? { increment: 1 } : undefined,
+      userUnreadCount: senderType === SENDER_TYPE.AGENT ? { increment: 1 } : undefined,
       updatedAt: new Date()
     }
   });
 
-  return message;
+  let isInitialMessage = false;
+
+  // Nếu đây là tin nhắn ĐẦU TIÊN từ phía User trong cuộc hội thoại, phát notification cho Admin
+  if (senderType === SENDER_TYPE.USER) {
+    try {
+      const userMessageCount = await prisma.supportMessage.count({
+        where: { conversationId, senderType: SENDER_TYPE.USER }
+      });
+
+      if (userMessageCount === 1) {
+        isInitialMessage = true;
+        const conv = await prisma.supportConversation.findUnique({
+          where: { id: conversationId },
+          include: { user: { select: { name: true } } }
+        });
+        if (conv) {
+          const senderName = conv.user?.name || 'Khách hàng';
+          notifyAllAdmins({
+            title: 'Cuộc trò chuyện CSKH mới',
+            content: `${senderName} vừa gửi yêu cầu tư vấn mới #${conv.code}: "${content.slice(0, 60)}"`,
+            type: NOTIFICATION_TYPE.SYSTEM,
+            link: `${TICKET_LINKS.ADMIN_SUPPORT}?tab=chat&chatId=${conv.id}`
+          }).catch((err) => console.error('[Notification] Error sending first user message notification:', err));
+        }
+      }
+    } catch (err) {
+      console.error('[Notification] Error in sendMessage notifyAllAdmins:', err);
+    }
+  }
+
+  return { message, isInitialMessage };
 }
 
 export async function getConversations(role: string, userId: number, status?: string, search?: string) {
@@ -180,7 +234,11 @@ export async function getConversations(role: string, userId: number, status?: st
   return conversations;
 }
 
-export async function getConversationDetail(conversationId: number) {
+export async function getConversationDetail(conversationId: number, role?: string) {
+  if (role) {
+    await markConversationAsRead(conversationId, role);
+  }
+
   const conversation = await prisma.supportConversation.findUnique({
     where: { id: conversationId },
     include: {
@@ -202,11 +260,34 @@ export async function getConversationDetail(conversationId: number) {
   return conversation;
 }
 
+export async function markConversationAsRead(conversationId: number, role: string) {
+  if (role === 'admin') {
+    await prisma.supportConversation.update({
+      where: { id: conversationId },
+      data: { agentUnreadCount: 0 }
+    });
+  } else {
+    await prisma.supportConversation.update({
+      where: { id: conversationId },
+      data: { userUnreadCount: 0 }
+    });
+  }
+}
+
 export async function acceptConversation(conversationId: number, adminId: number) {
+  const systemMessage = await prisma.supportMessage.create({
+    data: {
+      conversationId,
+      senderType: SENDER_TYPE.SYSTEM,
+      content: 'Nhân viên CSKH đã tiếp nhận cuộc trò chuyện.',
+      isSystemNotice: true
+    }
+  });
+
   const updated = await prisma.supportConversation.update({
     where: { id: conversationId },
     data: {
-      status: 'AGENT_HANDLING',
+      status: CHAT_STATUS.AGENT_HANDLING,
       assignedTo: adminId
     },
     include: {
@@ -216,16 +297,7 @@ export async function acceptConversation(conversationId: number, adminId: number
     }
   });
 
-  await prisma.supportMessage.create({
-    data: {
-      conversationId,
-      senderType: 'SYSTEM',
-      content: 'Nhân viên CSKH đã tiếp nhận cuộc trò chuyện.',
-      isSystemNotice: true
-    }
-  });
-
-  return updated;
+  return { conversation: updated, systemMessage };
 }
 
 export async function convertChatToTicket(
@@ -283,7 +355,7 @@ export async function convertChatToTicket(
     await tx.supportConversation.update({
       where: { id: conversationId },
       data: {
-        status: 'CONVERTED_TO_TICKET',
+        status: CHAT_STATUS.CONVERTED_TO_TICKET,
         closedAt: new Date()
       }
     });
@@ -291,7 +363,7 @@ export async function convertChatToTicket(
     const systemNotice = await tx.supportMessage.create({
       data: {
         conversationId,
-        senderType: 'SYSTEM',
+        senderType: SENDER_TYPE.SYSTEM,
         content: `Cuộc trò chuyện này đã được chuyển thành yêu cầu hỗ trợ mã #${createdTicket.code}.`,
         isSystemNotice: true
       }
@@ -308,7 +380,7 @@ export async function convertChatToTicket(
         conversationId,
         ticketId: ticket.id,
         ticketCode: ticket.code,
-        status: 'CONVERTED_TO_TICKET'
+        status: CHAT_STATUS.CONVERTED_TO_TICKET
       };
       io.to(`conversation_${conversationId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
       io.to(`user_${conversation.userId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
@@ -326,7 +398,7 @@ export async function resolveConversation(conversationId: number) {
   const conversation = await prisma.supportConversation.update({
     where: { id: conversationId },
     data: {
-      status: 'RESOLVED',
+      status: CHAT_STATUS.RESOLVED,
       closedAt: new Date()
     }
   });
@@ -334,7 +406,7 @@ export async function resolveConversation(conversationId: number) {
   await prisma.supportMessage.create({
     data: {
       conversationId,
-      senderType: 'SYSTEM',
+      senderType: SENDER_TYPE.SYSTEM,
       content: 'Cuộc trò chuyện đã hoàn tất.',
       isSystemNotice: true
     }
@@ -357,7 +429,7 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
 
   const expiredConversations = await prisma.supportConversation.findMany({
     where: {
-      status: 'WAITING_AGENT',
+      status: CHAT_STATUS.WAITING_AGENT,
       updatedAt: { lt: timeoutThreshold }
     }
   });
@@ -380,7 +452,7 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
     await prisma.supportConversation.update({
       where: { id: conv.id },
       data: {
-        status: 'CONVERTED_TO_TICKET',
+        status: CHAT_STATUS.CONVERTED_TO_TICKET,
         closedAt: new Date()
       }
     });
@@ -388,7 +460,7 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
     const systemNoticeMsg = await prisma.supportMessage.create({
       data: {
         conversationId: conv.id,
-        senderType: 'SYSTEM',
+        senderType: SENDER_TYPE.SYSTEM,
         content: `Hệ thống đã tự động chuyển yêu cầu chat này thành Ticket #${autoTicket.code} do thời gian chờ lâu.`,
         isSystemNotice: true
       }
@@ -402,7 +474,7 @@ export async function autoEscalateTimeoutConversations(timeoutMinutes = 5) {
           conversationId: conv.id,
           ticketId: autoTicket.id,
           ticketCode: autoTicket.code,
-          status: 'CONVERTED_TO_TICKET'
+          status: CHAT_STATUS.CONVERTED_TO_TICKET
         };
         io.to(`conversation_${conv.id}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);
         io.to(`user_${conv.userId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_CONVERTED, convertPayload);

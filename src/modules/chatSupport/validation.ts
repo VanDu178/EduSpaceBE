@@ -1,6 +1,7 @@
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
 import { AppError } from '../../utils/appError';
 import prisma from '../../config/db';
+import { CHAT_STATUS, SENDER_TYPE } from './constants';
 import {
   startConversationSchema,
   sendMessageSchema,
@@ -13,8 +14,8 @@ import {
 } from './zodSchemas';
 
 function parseQueryString(val: any): string | undefined {
-  if (typeof val === 'string') return val;
-  if (Array.isArray(val) && typeof val[0] === 'string') return val[0];
+  if (typeof val === 'string' && val.trim() !== '' && val !== 'null' && val !== 'undefined') return val;
+  if (Array.isArray(val) && typeof val[0] === 'string' && val[0].trim() !== '' && val[0] !== 'null' && val[0] !== 'undefined') return val[0];
   return undefined;
 }
 
@@ -43,12 +44,12 @@ export function validateStartConversation(req: AuthenticatedRequest): {
 export async function validateSendMessage(req: AuthenticatedRequest): Promise<{
   userId: number;
   role: string;
-  senderType: 'AGENT' | 'USER';
+  senderType: typeof SENDER_TYPE.AGENT | typeof SENDER_TYPE.USER;
   input: SendMessageInput;
 }> {
   const userId = req.user!.id;
   const role = req.user!.role;
-  const senderType = role === 'admin' ? 'AGENT' : 'USER';
+  const senderType = role === 'admin' ? SENDER_TYPE.AGENT : SENDER_TYPE.USER;
 
   const parseResult = sendMessageSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -64,7 +65,7 @@ export async function validateSendMessage(req: AuthenticatedRequest): Promise<{
     throw new AppError('Không tìm thấy cuộc trò chuyện', 404, 'NOT_FOUND');
   }
 
-  if (conversation.status === 'RESOLVED' || conversation.status === 'CONVERTED_TO_TICKET') {
+  if (conversation.status === CHAT_STATUS.RESOLVED || conversation.status === CHAT_STATUS.CONVERTED_TO_TICKET) {
     throw new AppError('Cuộc trò chuyện đã kết thúc hoặc đã chuyển thành Ticket', 400, 'BAD_REQUEST');
   }
 

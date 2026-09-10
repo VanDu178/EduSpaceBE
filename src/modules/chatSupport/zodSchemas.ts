@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { TicketCategoryEnum, TicketPriorityEnum } from '../ticketSupport/zodSchemas';
+import { VALID_CHAT_STATUSES, VALID_SENDER_TYPES } from './constants';
 
-export const ConversationStatusEnum = z.enum(['BOT', 'WAITING_AGENT', 'AGENT_HANDLING', 'RESOLVED', 'CONVERTED_TO_TICKET']);
-export const SenderTypeEnum = z.enum(['USER', 'BOT', 'AGENT', 'SYSTEM']);
+export const ConversationStatusEnum = z.enum(VALID_CHAT_STATUSES as [string, ...string[]]);
+
+export const SenderTypeEnum = z.enum(VALID_SENDER_TYPES as [string, ...string[]]);
 
 export const startConversationSchema = z.object({
   initialMessage: z.string().optional()

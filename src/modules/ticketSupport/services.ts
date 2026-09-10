@@ -40,7 +40,8 @@ export async function createTicket(userId: number, input: CreateTicketInput) {
         priority: input.priority as TicketPriority,
         status: TICKET_STATUS.OPEN,
         creatorId: userId,
-        assigneeId: defaultAdmin?.id || null
+        assigneeId: defaultAdmin?.id || null,
+        assigneeUnreadCount: 1
       },
       include: {
         creator: {
@@ -74,7 +75,7 @@ export async function createTicket(userId: number, input: CreateTicketInput) {
       title: 'Yêu cầu hỗ trợ mới được phân công',
       content: `Khách hàng ${ticket.creator?.name || ''} đã gửi yêu cầu hỗ trợ mới #${ticket.code}`,
       type: NOTIFICATION_TYPE.TICKET_CREATED,
-      link: TICKET_LINKS.ADMIN_SUPPORT,
+      link: `${TICKET_LINKS.ADMIN_SUPPORT}?tab=tickets&ticketId=${ticket.id}`,
     }).catch((err) => console.error('[Notification] Error in createTicket createAndSendNotification:', err));
   }
 
@@ -108,8 +109,8 @@ export async function getTickets(
   if (role !== 'admin') {
     whereCondition.creatorId = userId;
   } else {
-    // FE Admin: Chỉ load danh sách Ticket được phân công chính admin đó
-    whereCondition.assigneeId = userId;
+    // FE Admin: Load danh sách Ticket được phân công cho Admin hoặc chưa được phân công (null)
+    whereCondition.OR = [{ assigneeId: userId }, { assigneeId: null }];
   }
 
   if (query.status) {
@@ -177,7 +178,11 @@ export async function getTickets(
 /**
  * 3. Service lấy chi tiết một Ticket theo ID
  */
-export async function getTicketById(ticketId: number) {
+export async function getTicketById(ticketId: number, role?: string) {
+  if (role) {
+    await markTicketAsRead(ticketId, role);
+  }
+
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: ticketId },
     include: {
@@ -206,6 +211,20 @@ export async function getTicketById(ticketId: number) {
   });
 
   return ticket;
+}
+
+export async function markTicketAsRead(ticketId: number, role: string) {
+  if (role === 'admin') {
+    await prisma.supportTicket.update({
+      where: { id: ticketId },
+      data: { assigneeUnreadCount: 0 }
+    });
+  } else {
+    await prisma.supportTicket.update({
+      where: { id: ticketId },
+      data: { creatorUnreadCount: 0 }
+    });
+  }
 }
 
 /**
@@ -250,7 +269,9 @@ export async function addTicketComment(
     where: { id: ticketId },
     data: {
       status: nextStatus,
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      creatorUnreadCount: role === 'admin' ? { increment: 1 } : undefined,
+      assigneeUnreadCount: role !== 'admin' ? { increment: 1 } : undefined
     }
   });
 
@@ -262,7 +283,7 @@ export async function addTicketComment(
         title: `Phản hồi mới cho yêu cầu hỗ trợ ${ticket.title}`,
         content: `Bộ phận CSKH vừa trả lời: "${input?.content?.slice(0, 80)}"`,
         type: NOTIFICATION_TYPE.TICKET_REPLIED,
-        link: TICKET_LINKS.CUSTOMER_SUPPORT
+        link: `${TICKET_LINKS.CUSTOMER_SUPPORT}?ticketId=${ticket.id}`
       }).catch((err) => console.error('[Notification] Error sending comment notification to user:', err));
     } else if (role !== 'admin') {
       if (ticket.assigneeId) {
@@ -271,14 +292,14 @@ export async function addTicketComment(
           title: `Phản hồi từ khách hàng ở yêu cầu hỗ trợ ${ticket.code}`,
           content: `Khách hàng vừa phản hồi: "${input?.content?.slice(0, 80)}"`,
           type: NOTIFICATION_TYPE.TICKET_REPLIED,
-          link: TICKET_LINKS.ADMIN_SUPPORT
+          link: `${TICKET_LINKS.ADMIN_SUPPORT}?tab=tickets&ticketId=${ticket.id}`
         }).catch((err) => console.error('[Notification] Error sending comment notification to assignee admin:', err));
       } else {
         notifyAllAdmins({
           title: `Phản hồi từ khách hàng ở yêu cầu hỗ trợ ${ticket.code}`,
           content: `Khách hàng vừa phản hồi: "${input?.content?.slice(0, 80)}"`,
           type: NOTIFICATION_TYPE.TICKET_REPLIED,
-          link: TICKET_LINKS.ADMIN_SUPPORT,
+          link: `${TICKET_LINKS.ADMIN_SUPPORT}?tab=tickets&ticketId=${ticket.id}`,
           excludeUserId: senderId
         }).catch((err) => console.error('[Notification] Error sending comment notification to admins:', err));
       }
@@ -352,7 +373,7 @@ export async function updateTicketStatus(ticketId: number, input: UpdateTicketSt
       title: `Trạng thái Ticket #${updatedTicket.title} đã cập nhật`,
       content: `Trạng thái mới: ${statusText}`,
       type: NOTIFICATION_TYPE.TICKET_STATUS_CHANGED,
-      link: TICKET_LINKS.CUSTOMER_SUPPORT
+      link: `${TICKET_LINKS.CUSTOMER_SUPPORT}?ticketId=${updatedTicket.id}`
     }).catch((err) => console.error('[Notification] Error sending status update notification:', err));
   }
 

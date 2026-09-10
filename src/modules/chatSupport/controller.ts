@@ -4,17 +4,36 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import * as validation from './validation';
 import * as chatService from './services';
 import { getIO } from '../../config/socket/socketManager';
-import { CHAT_SOCKET_EVENTS } from './constants';
+import { CHAT_SOCKET_EVENTS, SENDER_TYPE } from './constants';
 
 export const startConversationHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId, input } = validation.validateStartConversation(req);
   const result = await chatService.startConversation(userId, input.initialMessage);
 
+  if (result.conversation) {
+    try {
+      const io = getIO();
+      io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+        conversationId: result.conversation.id
+      });
+      const userMessage = result.conversation.messages?.find((m) => m.senderType === SENDER_TYPE.USER);
+      if (userMessage) {
+        io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.USER_NEW_MESSAGE_NOTICE, {
+          conversationId: result.conversation.id,
+          user: req.user,
+          message: userMessage
+        });
+      }
+    } catch (err) {
+      console.error('[startConversationHandler] Socket broadcast notice error:', err);
+    }
+  }
+
   res.status(200).json({
     success: true,
     message: result.isAgentOnline
       ? 'Đã kết nối với hệ thống CSKH TradeVerse'
-      : 'Admin hiện không trực tuyến. Vui lòng gửi Ticket hỗ trợ!',
+      : 'Admin hiện không trực tuyến. Vui lòng gửi yêu cầu hỗ trợ!',
     data: result
   });
 });
@@ -22,7 +41,7 @@ export const startConversationHandler = asyncHandler(async (req: AuthenticatedRe
 export const sendMessageHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { userId, senderType, input } = await validation.validateSendMessage(req);
 
-  const message = await chatService.sendMessage(
+  const { message, isInitialMessage } = await chatService.sendMessage(
     input.conversationId,
     senderType,
     userId,
@@ -37,7 +56,11 @@ export const sendMessageHandler = asyncHandler(async (req: AuthenticatedRequest,
       message
     });
 
-    if (senderType === 'USER') {
+    if (senderType === SENDER_TYPE.USER) {
+      io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+        conversationId: input.conversationId
+      });
+
       io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.USER_NEW_MESSAGE_NOTICE, {
         conversationId: input.conversationId,
         user: req.user,
@@ -66,7 +89,7 @@ export const getConversationsHandler = asyncHandler(async (req: AuthenticatedReq
 
 export const getConversationDetailHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { conversationId } = await validation.validateGetConversationDetail(req);
-  const conversation = await chatService.getConversationDetail(conversationId);
+  const conversation = await chatService.getConversationDetail(conversationId, req.user?.role);
 
   res.status(200).json({
     success: true,
@@ -74,9 +97,53 @@ export const getConversationDetailHandler = asyncHandler(async (req: Authenticat
   });
 });
 
+export const markConversationAsReadHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { conversationId } = await validation.validateGetConversationDetail(req);
+  await chatService.markConversationAsRead(conversationId, req.user?.role || 'user');
+
+  try {
+    const io = getIO();
+    if (req.user?.role === 'admin') {
+      io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+        conversationId
+      });
+    } else {
+      io.to(`user_${req.user?.id}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+        conversationId
+      });
+    }
+  } catch (err) {
+    console.error('[markConversationAsReadHandler] Socket broadcast error:', err);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Đã đánh dấu cuộc trò chuyện là đã đọc'
+  });
+});
+
 export const acceptConversationHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { conversationId, adminId } = await validation.validateAcceptConversation(req);
-  const conversation = await chatService.acceptConversation(conversationId, adminId);
+  const { conversation, systemMessage } = await chatService.acceptConversation(conversationId, adminId);
+
+  try {
+    const io = getIO();
+
+    io.to(`conversation_${conversationId}`).emit(CHAT_SOCKET_EVENTS.NEW_MESSAGE, {
+      conversationId,
+      message: systemMessage
+    });
+
+    io.to(`conversation_${conversationId}`).emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+      conversationId
+    });
+
+    io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+      conversationId
+    });
+  } catch (err) {
+    console.error('[acceptConversationHandler] Socket broadcast error:', err);
+  }
 
   res.status(200).json({
     success: true,
@@ -93,6 +160,15 @@ export const convertChatToTicketHandler = asyncHandler(async (req: Authenticated
     input
   );
 
+  try {
+    const io = getIO();
+    io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+      conversationId: input.conversationId
+    });
+  } catch (err) {
+    console.error('[convertChatToTicketHandler] Socket broadcast error:', err);
+  }
+
   res.status(201).json({
     success: true,
     message: `Đã chuyển cuộc trò chuyện thành Ticket #${ticket.code}`,
@@ -103,6 +179,15 @@ export const convertChatToTicketHandler = asyncHandler(async (req: Authenticated
 export const resolveConversationHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { conversationId } = await validation.validateResolveConversation(req);
   const conversation = await chatService.resolveConversation(conversationId);
+
+  try {
+    const io = getIO();
+    io.to('admin_agents').emit(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, {
+      conversationId
+    });
+  } catch (err) {
+    console.error('[resolveConversationHandler] Socket broadcast error:', err);
+  }
 
   res.status(200).json({
     success: true,

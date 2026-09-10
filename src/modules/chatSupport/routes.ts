@@ -11,6 +11,7 @@ router.post('/chat/start', chatController.startConversationHandler as any);
 router.post('/chat/message', chatController.sendMessageHandler as any);
 router.get('/chat/conversations', chatController.getConversationsHandler as any);
 router.get('/chat/conversations/:id', chatController.getConversationDetailHandler as any);
+router.post('/chat/conversations/:id/read', chatController.markConversationAsReadHandler as any);
 
 // Admin-only Chat Actions
 router.post('/chat/conversations/:id/accept', adminMiddleware as any, chatController.acceptConversationHandler as any);

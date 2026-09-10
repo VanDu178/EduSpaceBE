@@ -1,5 +1,36 @@
 import prisma from '../../config/db';
-import { TICKET_RATE_LIMIT } from './constants';
+import { TICKET_RATE_LIMIT, TICKET_STATUS } from './constants';
+
+/**
+ * Kiểm tra xem chuyển đổi từ currentStatus sang targetStatus có hợp lệ không
+ */
+export function isValidStatusTransition(currentStatus: string, targetStatus: string): boolean {
+  if (currentStatus === targetStatus) return true;
+
+  // Nếu ticket đã đóng (CLOSED), không thể chuyển sang bất kỳ trạng thái nào khác
+  if (currentStatus === TICKET_STATUS.CLOSED) {
+    return false;
+  }
+
+  // Nếu ticket đã giải quyết (RESOLVED), không thể chuyển về OPEN, IN_PROGRESS, PENDING_USER
+  if (currentStatus === TICKET_STATUS.RESOLVED) {
+    if (
+      targetStatus === TICKET_STATUS.OPEN ||
+      targetStatus === TICKET_STATUS.IN_PROGRESS ||
+      targetStatus === TICKET_STATUS.PENDING_USER
+    ) {
+      return false;
+    }
+  }
+
+  // Nếu ticket đã rời khỏi trạng thái Mới (OPEN), không thể chuyển về lại OPEN
+  if (currentStatus !== TICKET_STATUS.OPEN && targetStatus === TICKET_STATUS.OPEN) {
+    return false;
+  }
+
+  return true;
+}
+
 
 /**
  * Sinh mã Ticket theo định dạng TK-YYYYMMDD-XXXX không trùng lặp
