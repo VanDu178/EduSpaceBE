@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import prisma from '../../config/db';
-import { verifyRefreshToken } from './utils';
+import { verifyRefreshToken, getRecentlyRotatedToken } from './utils';
 import { AppError } from '../../utils/appError';
 import { USER_STATUS } from './constants';
 import {
@@ -460,6 +460,17 @@ export const validateTokenRefreshData = async (cookies: any) => {
   });
 
   if (!savedToken) {
+    // Kiểm tra xem token này có vừa mới được xoay vòng gần đây (Grace Period 15 giây) hay không
+    const recentlyRotated = getRecentlyRotatedToken(refreshToken);
+    if (recentlyRotated) {
+      return {
+        isGracePeriod: true,
+        newAccessToken: recentlyRotated.newAccessToken,
+        newRefreshToken: recentlyRotated.newRefreshToken,
+        user: recentlyRotated.user,
+      };
+    }
+
     await prisma.refreshToken.deleteMany({
       where: { userId: decoded.userId },
     });

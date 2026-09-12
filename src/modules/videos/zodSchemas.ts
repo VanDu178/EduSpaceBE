@@ -115,7 +115,7 @@ export const updateVideoAccessSchema = z.object({
 // Schema truy vấn danh sách Video (Query parameters)
 export const queryVideoSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().default(10),
+  limit: z.coerce.number().int().positive().max(100, { message: 'Số lượng bản ghi mỗi trang tối đa 100' }).default(10),
   search: z.string().optional(),
   videoTypeId: z.coerce.number().int().positive().optional(),
   sourceType: z.enum(sourceTypesTuple).optional(),

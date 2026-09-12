@@ -141,7 +141,8 @@ export const getDynamicHlsPlaylist = asyncHandler(async (req: Request, res: Resp
   const { existingVideo, variant } = await validateGetHlsPlaylist(
     req.params.id as string,
     req.params.variant as string,
-    false
+    false,
+    (req as any).user
   );
   const result = await getDynamicHlsPlaylistService(existingVideo, variant, (req as any).user);
 
@@ -161,7 +162,8 @@ export const getDynamicHlsPlaylistBySlug = asyncHandler(async (req: Request, res
   const { existingVideo, variant } = await validateGetHlsPlaylist(
     req.params.slug as string,
     req.params.variant as string,
-    true
+    true,
+    (req as any).user
   );
   const result = await getDynamicHlsPlaylistService(existingVideo, variant, (req as any).user);
 

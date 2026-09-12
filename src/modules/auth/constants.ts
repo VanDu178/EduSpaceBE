@@ -21,4 +21,10 @@ export const AUTH_PROVIDERS = {
   GOOGLE: 'google',
 } as const;
 
+/**
+ * Thời gian ân hạn (Grace Period) cho phép tái sử dụng Refresh Token vừa xoay vòng (15 giây)
+ */
+export const TOKEN_REFRESH_GRACE_PERIOD_MS = 15 * 1000;
+
+
 

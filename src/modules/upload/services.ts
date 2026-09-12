@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../../utils/appError';
 import { uploadToSupabase, deleteFromSupabase } from '../../services/supabaseStorageService';
@@ -124,7 +125,40 @@ export async function completeUploadSessionService(storagePath: string) {
 /**
  * 6. Service tiếp nhận Webhook từ Bunny Stream để đồng bộ trạng thái mã hóa HLS (processStatus)
  */
-export async function handleBunnyWebhookService(body: any) {
+export async function handleBunnyWebhookService(body: any, headers?: any, query?: any) {
+  // 0. BẢO MẬT: Kiểm tra Secret Token / Signature của Webhook Bunny Stream
+  const webhookSecret = process.env.BUNNY_WEBHOOK_SECRET || '';
+
+  if (webhookSecret) {
+    const reqToken =
+      headers?.['x-bunny-webhook-secret'] ||
+      headers?.['b-signature'] ||
+      headers?.['x-webhook-secret'] ||
+      headers?.['authorization'] ||
+      query?.token ||
+      query?.secret ||
+      query?.key;
+
+    const cleanToken = reqToken ? String(reqToken).replace(/^Bearer\s+/i, '').trim() : '';
+
+    if (!cleanToken) {
+      throw new AppError('Thiếu chữ ký hoặc Secret Token xác thực Webhook Bunny Stream', 401, 'UNAUTHORIZED');
+    }
+
+    const videoId = body?.VideoId || body?.videoId || body?.guid || body?.VideoGuid || '';
+    const hashDirect = crypto.createHash('sha256').update(webhookSecret).digest('hex');
+    const hashWithVideo = videoId ? crypto.createHash('sha256').update(webhookSecret + videoId).digest('hex') : '';
+
+    const isValid =
+      cleanToken === webhookSecret ||
+      cleanToken === hashDirect ||
+      (hashWithVideo !== '' && cleanToken === hashWithVideo);
+
+    if (!isValid) {
+      throw new AppError('Chữ ký hoặc Secret Token Webhook Bunny Stream không hợp lệ', 401, 'UNAUTHORIZED');
+    }
+  }
+
   const videoId = body.VideoId || body.videoId || body.guid || body.VideoGuid;
   const status = body.Status !== undefined ? body.Status : body.status;
 

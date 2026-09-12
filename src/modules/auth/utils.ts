@@ -56,3 +56,53 @@ export const verifyRefreshToken = (token: string): any => {
     return null;
   }
 };
+
+/**
+ * Bộ đệm RAM (In-Memory Cache) lưu các Refresh Token cũ vừa mới được xoay vòng.
+ * Thời gian sống (TTL): 15 giây.
+ */
+interface RotatedTokenData {
+  newAccessToken: string;
+  newRefreshToken: string;
+  user: any;
+  expiresAt: number;
+}
+
+const rotatedTokensCache = new Map<string, RotatedTokenData>();
+
+/**
+ * Đăng ký Refresh Token cũ vừa xoay vòng vào Grace Window (15 giây).
+ */
+export const registerRotatedToken = (
+  oldRefreshToken: string,
+  data: { newAccessToken: string; newRefreshToken: string; user: any }
+): void => {
+  const expiresAt = Date.now() + 15 * 1000;
+  rotatedTokensCache.set(oldRefreshToken, {
+    ...data,
+    expiresAt,
+  });
+
+  // Tự động dọn dẹp khỏi RAM sau 15 giây
+  setTimeout(() => {
+    rotatedTokensCache.delete(oldRefreshToken);
+  }, 15 * 1000);
+};
+
+/**
+ * Kiểm tra xem Refresh Token cũ có vừa được xoay vòng trong Grace Window (15s gần nhất) không.
+ */
+export const getRecentlyRotatedToken = (
+  oldRefreshToken: string
+): RotatedTokenData | null => {
+  const data = rotatedTokensCache.get(oldRefreshToken);
+  if (!data) return null;
+
+  if (Date.now() > data.expiresAt) {
+    rotatedTokensCache.delete(oldRefreshToken);
+    return null;
+  }
+
+  return data;
+};
+

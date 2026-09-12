@@ -4,6 +4,7 @@ import { AppError } from '../../utils/appError';
 import {
   generateAccessToken,
   generateRefreshToken,
+  registerRotatedToken,
 } from './utils';
 import { getUserWithSubscription } from '../../middlewares/authMiddleware';
 import { sendForgotPasswordOtpEmail } from '../../services/emailService';
@@ -231,6 +232,13 @@ export const tokenRefreshService = async (savedToken: any, user: any) => {
         },
       }),
     ]);
+
+    // Đăng ký Refresh Token cũ vừa mới xoay vòng vào Grace Window (15 giây)
+    registerRotatedToken(savedToken.token, {
+      newAccessToken,
+      newRefreshToken,
+      user,
+    });
 
     return {
       newAccessToken,

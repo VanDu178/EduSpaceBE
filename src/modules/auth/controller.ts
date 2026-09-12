@@ -125,12 +125,35 @@ export const changePassword = asyncHandler(
  */
 export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => {
   try {
-    const { savedToken, user } = await validateTokenRefreshData(req.cookies);
+    const validationResult: any = await validateTokenRefreshData(req.cookies);
+
+    // Nếu rơi vào Grace Period (Request trùng do Race Condition / Multi-tab trong 15s)
+    if (validationResult.isGracePeriod) {
+      res.cookie(
+        'refreshToken',
+        validationResult.newRefreshToken,
+        REFRESH_TOKEN_COOKIE_OPTIONS
+      );
+      return sendSuccess(
+        res,
+        {
+          accessToken: validationResult.newAccessToken,
+          user: validationResult.user,
+        },
+        'Token refresh thành công (Grace Window)'
+      );
+    }
+
+    const { savedToken, user } = validationResult;
     const result = await tokenRefreshService(savedToken, user);
-    res.cookie('refreshToken', result.newRefreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+    res.cookie(
+      'refreshToken',
+      result.newRefreshToken,
+      REFRESH_TOKEN_COOKIE_OPTIONS
+    );
     return sendSuccess(
       res,
-      { accessToken: result.newAccessToken },
+      { accessToken: result.newAccessToken, user },
       'Token refresh thành công'
     );
   } catch (error) {

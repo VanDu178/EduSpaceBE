@@ -99,7 +99,7 @@ export async function deleteFromSupabase(filePath: string): Promise<boolean> {
 
 /**
  * Trích xuất filePath tương đối trong bucket từ Public URL của Supabase.
- * Ví dụ: "https://xxx.supabase.co/storage/v1/object/public/eduspace/blogs/abc.png" -> "blogs/abc.png"
+ * Ví dụ: "https://xxx.supabase.co/storage/object/public/eduspace/blogs/abc.png" -> "blogs/abc.png"
  */
 export function extractStoragePath(publicUrl: string): string | null {
   if (!publicUrl || typeof publicUrl !== 'string') return null;

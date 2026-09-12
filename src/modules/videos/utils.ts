@@ -73,7 +73,7 @@ export async function fetchYoutubeMetadata(youtubeVideoId: string): Promise<{ is
 
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeVideoId}&format=json`;
-    const response = await fetch(oembedUrl);
+    const response = await fetch(oembedUrl, { signal: AbortSignal.timeout(5000) });
 
     if (!response.ok) {
       return { isValid: false, thumbnailUrl: null };
@@ -99,15 +99,18 @@ export async function fetchYoutubeMetadata(youtubeVideoId: string): Promise<{ is
 
 /**
  * Cắt ngắn nội dung file HLS Variant Playlist (.m3u8) dựa theo thời lượng xem thử (teaserDuration - tính bằng giây)
+ * và tự động chuẩn hóa các URL phân đoạn tương đối thành URL tuyệt đối trên CDN
  */
 export function truncateHlsVariantPlaylist(
   m3u8Content: string,
-  teaserDuration: number
+  teaserDuration: number,
+  baseUrl?: string
 ): string {
   if (teaserDuration === undefined || teaserDuration === null || teaserDuration < 0) {
     teaserDuration = 180;
   }
 
+  const cleanBaseUrl = baseUrl ? baseUrl.replace(/\/+$/, '') : '';
   const lines = m3u8Content.split('\n');
   const resultLines: string[] = [];
   let accumulatedDuration = 0;
@@ -131,14 +134,22 @@ export function truncateHlsVariantPlaylist(
       if (i + 1 < lines.length) {
         const nextLine = lines[i + 1].trim();
         if (nextLine && !nextLine.startsWith('#')) {
-          resultLines.push(nextLine);
+          let segmentUrl = nextLine;
+          if (cleanBaseUrl && !segmentUrl.startsWith('http://') && !segmentUrl.startsWith('https://')) {
+            segmentUrl = `${cleanBaseUrl}/${segmentUrl.replace(/^\/+/, '')}`;
+          }
+          resultLines.push(segmentUrl);
           i++;
         }
       }
     } else if (line.startsWith('#EXT-X-ENDLIST')) {
       continue;
     } else {
-      resultLines.push(line);
+      let processedLine = line;
+      if (cleanBaseUrl && !processedLine.startsWith('#') && !processedLine.startsWith('http://') && !processedLine.startsWith('https://')) {
+        processedLine = `${cleanBaseUrl}/${processedLine.replace(/^\/+/, '')}`;
+      }
+      resultLines.push(processedLine);
     }
   }
 

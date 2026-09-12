@@ -22,7 +22,7 @@ import {
 
 /**
  * 1. Controller xử lý upload 1 file đơn lẻ
- * Route: POST /api/v1/upload/single
+ * Route: POST /api/upload/single
  */
 export const uploadSingleFile = asyncHandler(async (req: Request, res: Response) => {
   const { file, folder } = await validateUploadSingleFileData(req.file, req.body);
@@ -32,7 +32,7 @@ export const uploadSingleFile = asyncHandler(async (req: Request, res: Response)
 
 /**
  * 2. Controller xử lý upload nhiều file cùng lúc
- * Route: POST /api/v1/upload/multiple
+ * Route: POST /api/upload/multiple
  */
 export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Response) => {
   const { files, folder } = await validateUploadMultipleFilesData(
@@ -45,7 +45,7 @@ export const uploadMultipleFiles = asyncHandler(async (req: Request, res: Respon
 
 /**
  * 3. Controller xử lý xóa file khỏi Supabase Storage
- * Route: DELETE /api/v1/upload
+ * Route: DELETE /api/upload
  */
 export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
   const { filePath } = await validateDeleteFileData(req.body, req.query);
@@ -55,7 +55,7 @@ export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * 4. Controller khởi tạo phiên upload Bunny Stream
- * Route: POST /api/v1/upload/bunny/create-session
+ * Route: POST /api/upload/bunny/create-session
  */
 export const initBunnyStreamSession = asyncHandler(async (req: Request, res: Response) => {
   const { title } = await validateInitBunnyStreamData(req.body);
@@ -66,7 +66,7 @@ export const initBunnyStreamSession = asyncHandler(async (req: Request, res: Res
 
 /**
  * 5. Controller dọn dẹp/xóa tệp video trên Bunny Stream
- * Route: DELETE /api/v1/upload/bunny/:videoId
+ * Route: DELETE /api/upload/bunny/:videoId
  */
 export const deleteBunnyVideo = asyncHandler(async (req: Request, res: Response) => {
   const videoId = String(req.params.videoId);
@@ -76,10 +76,10 @@ export const deleteBunnyVideo = asyncHandler(async (req: Request, res: Response)
 
 /**
  * 6. Controller xử lý Webhook thông báo từ Bunny Stream CDN
- * Route: POST /api/v1/upload/bunny/webhook
+ * Route: POST /api/upload/bunny/webhook
  */
 export const handleBunnyWebhook = asyncHandler(async (req: Request, res: Response) => {
-  const result = await handleBunnyWebhookService(req.body);
+  const result = await handleBunnyWebhookService(req.body, req.headers, req.query);
   return sendSuccess(res, result, 'Xử lý Webhook Bunny Stream thành công!');
 });
 

@@ -297,7 +297,12 @@ export async function validateDeleteVideo(id: string) {
 /**
  * 8. Validate yêu cầu Dynamic HLS Playlist (theo ID hoặc Slug)
  */
-export async function validateGetHlsPlaylist(identifier: string, variant?: string, isSlug: boolean = false) {
+export async function validateGetHlsPlaylist(
+  identifier: string,
+  variant?: string,
+  isSlug: boolean = false,
+  user?: any
+) {
   if (!identifier || typeof identifier !== 'string') {
     throw new AppError('Mã định danh video không hợp lệ', 400, VIDEO_ERROR_CODES.VALIDATION_ERROR);
   }
@@ -308,6 +313,11 @@ export async function validateGetHlsPlaylist(identifier: string, variant?: strin
   });
 
   if (!existingVideo) {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
+  // Bảo vệ Video Nháp / Ẩn (draft / archived): Người dùng thường hoặc khách không được phát luồng HLS
+  if (existingVideo.status !== 'published' && user?.role !== 'admin') {
     throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
   }
 

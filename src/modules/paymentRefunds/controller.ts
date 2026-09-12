@@ -15,7 +15,7 @@ import {
 
 /**
  * Lấy danh sách tất cả các phiếu hoàn tiền CSKH (Admin đối soát)
- * Route: GET /api/v1/payment-refunds
+ * Route: GET /api/payment-refunds
  */
 export const getRefunds = asyncHandler(async (req: Request, res: Response) => {
   const queryData = await validateGetRefundsData(req.query);
@@ -25,7 +25,7 @@ export const getRefunds = asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * CSKH / Admin xác nhận tạo phiếu hoàn tiền cho giao dịch nạp dư
- * Route: POST /api/v1/payment-refunds
+ * Route: POST /api/payment-refunds
  */
 export const createRefund = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const validatedData = await validateCreateRefundData(req.body, req.user?.id);
@@ -35,7 +35,7 @@ export const createRefund = asyncHandler(async (req: AuthenticatedRequest, res: 
 
 /**
  * CSKH / Admin cập nhật thông tin phiếu hoàn tiền
- * Route: PUT /api/v1/payment-refunds/:id
+ * Route: PUT /api/payment-refunds/:id
  */
 export const updateRefund = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const validatedData = await validateUpdateRefundData(req.params, req.body, req.user?.id);

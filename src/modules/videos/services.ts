@@ -3,7 +3,7 @@ import { AppError } from '../../utils/appError';
 import { deleteFromSupabase, extractStoragePath } from '../../services/supabaseStorageService';
 import { VIDEO_ERROR_CODES, STREAM_ACCESS_LEVELS, StreamAccessLevel, SOURCE_TYPES } from './constants';
 import { evaluateResourceAccess } from '../../services/resourceAccessEngine';
-import { deleteBunnyVideo, getBunnyHlsUrl, getBunnyVideoDetails } from '../../services/bunnyStreamService';
+import { deleteBunnyVideo, getBunnyHlsUrl, getBunnyEmbedUrl, getBunnyVideoDetails } from '../../services/bunnyStreamService';
 import { truncateHlsVariantPlaylist } from './utils';
 import { completeUploadSessionService } from '../upload/services';
 
@@ -201,18 +201,81 @@ export async function getVideoByIdAdminService(existingVideo: any) {
 }
 
 /**
- * 3. Service lấy chi tiết Video cho Client theo ID (Dynamic Access Control & Policy Engine)
+ * 3. Service lấy chi tiết Video cho Client theo ID
+ * - Nếu video FREE (isPremium = false): Cấp đầy đủ thông tin và đường dẫn phát HLS/YouTube
+ * - Nếu video PREMIUM (isPremium = true): Tạm dừng chưa xử lý luồng phát (videoUrl = null, hasFullAccess = false)
  */
-export async function getVideoByClientService(existingVideo: any, user?: any) {
-  const result = await evaluateResourceAccess({
-    resourceType: 'video',
-    resource: existingVideo,
-    featureCode: 'video:watch_premium',
-    user,
-    behaviorOnDenied: 'teaser',
-  });
+export async function getVideoByClientService(existingVideo: any, _user?: any) {
+  const { storagePath, youtubeVideoId, ...clientVideo } = existingVideo;
 
-  return result.data;
+  // 1. Phân định quyền truy cập người dùng (FULL vs TEASER/LOCK)
+  let hasFullAccess = false;
+  if (!existingVideo.isPremium) {
+    hasFullAccess = true;
+  } else if (_user?.role === 'admin') {
+    hasFullAccess = true;
+  } else if (_user?.id) {
+    const activeSub = await prisma.userSubscription.findFirst({
+      where: {
+        userId: _user.id,
+        endDate: { gte: new Date() },
+      },
+    });
+    if (activeSub) {
+      hasFullAccess = true;
+    }
+  }
+
+  // 2. Trường hợp có quyền FULL (Free, Admin, hoặc đã Mua gói Hội viên)
+  if (hasFullAccess) {
+    let videoUrl: string | null = null;
+
+    if (existingVideo.sourceType === 'youtube' || existingVideo.youtubeVideoId) {
+      videoUrl = existingVideo.youtubeVideoId
+        ? `https://www.youtube.com/watch?v=${existingVideo.youtubeVideoId}`
+        : null;
+    } else {
+      videoUrl = getBunnyEmbedUrl(existingVideo.storagePath || existingVideo.id);
+    }
+
+    return {
+      ...clientVideo,
+      youtubeVideoId,
+      hasFullAccess: true,
+      videoUrl,
+    };
+  }
+
+  // 3. Trường hợp KHÔNG CÓ QUYỀN FULL (hasFullAccess = false)
+  // 3a. Nếu có thời lượng xem thử (teaserDuration > 0) -> Cấp luồng Teaser an toàn
+  if (existingVideo.teaserDuration && existingVideo.teaserDuration > 0) {
+    let videoUrl: string | null = null;
+
+    if (existingVideo.sourceType === 'youtube' || existingVideo.youtubeVideoId) {
+      videoUrl = existingVideo.youtubeVideoId
+        ? `https://www.youtube.com/embed/${existingVideo.youtubeVideoId}?end=${existingVideo.teaserDuration}&enablejsapi=1&autoplay=1`
+        : null;
+    } else {
+      videoUrl = `/api/videos/id/${existingVideo.id}/playlist.m3u8`;
+    }
+
+    return {
+      ...clientVideo,
+      storagePath: null,
+      youtubeVideoId: null,
+      hasFullAccess: false,
+      videoUrl,
+    };
+  }
+
+  // 3b. Nếu không có Teaser (teaserDuration <= 0) -> Khóa hoàn toàn dữ liệu nhạy cảm
+  return {
+    ...clientVideo,
+    storagePath: null,
+    youtubeVideoId: null,
+    hasFullAccess: false,
+    videoUrl: null,
+  };
 }
 
 /**
@@ -291,16 +354,22 @@ export async function updateVideoService(existingVideo: any, validatedData: any)
       validatedData.storagePath !== existingVideo.storagePath;
 
     if (isSwitchingToYoutube || isChangingStoragePath) {
-      const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-      if (
-        existingVideo.storagePath.includes('bunny://') ||
-        existingVideo.storagePath.includes('b-cdn.net') ||
-        bunnyMatch
-      ) {
-        const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
-        await deleteBunnyVideo(videoId);
-      } else {
-        await deleteFromSupabase(existingVideo.storagePath);
+      const otherVideoCount = await prisma.video.count({
+        where: { storagePath: existingVideo.storagePath, NOT: { id: existingVideo.id } },
+      });
+
+      if (otherVideoCount === 0) {
+        const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        if (
+          existingVideo.storagePath.includes('bunny://') ||
+          existingVideo.storagePath.includes('b-cdn.net') ||
+          bunnyMatch
+        ) {
+          const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
+          await deleteBunnyVideo(videoId);
+        } else {
+          await deleteFromSupabase(existingVideo.storagePath);
+        }
       }
     }
 
@@ -409,18 +478,31 @@ export async function deleteVideoService(existingVideo: any) {
       );
     }
 
-    // 1. Tự động dọn dẹp file video trên Bunny Stream hoặc Supabase
+    // 1. Tự động dọn dẹp file video trên Bunny Stream hoặc Supabase (Chỉ xóa nếu không có video nào khác dùng chung)
     if (existingVideo.storagePath) {
-      const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-      if (
-        existingVideo.storagePath.includes('bunny://') ||
-        existingVideo.storagePath.includes('b-cdn.net') ||
-        bunnyMatch
-      ) {
-        const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
-        await deleteBunnyVideo(videoId);
-      } else {
-        await deleteFromSupabase(existingVideo.storagePath);
+      const otherVideoCount = await prisma.video.count({
+        where: { storagePath: existingVideo.storagePath, NOT: { id: existingVideo.id } },
+      });
+
+      if (otherVideoCount === 0) {
+        const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        if (
+          existingVideo.storagePath.includes('bunny://') ||
+          existingVideo.storagePath.includes('b-cdn.net') ||
+          bunnyMatch
+        ) {
+          const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
+          const isDeleted = await deleteBunnyVideo(videoId);
+          if (!isDeleted) {
+            throw new AppError(
+              'Không thể xóa tệp video trên máy chủ Bunny Stream CDN. Vui lòng thử lại sau!',
+              500,
+              VIDEO_ERROR_CODES.DELETE_FAILED
+            );
+          }
+        } else {
+          await deleteFromSupabase(existingVideo.storagePath);
+        }
       }
     }
 
@@ -492,6 +574,11 @@ export async function getDynamicHlsPlaylistService(
     );
   }
 
+  // Kiểm tra trạng thái xuất bản video: ngoại trừ Admin, các người dùng khác không được truy cập HLS video draft/archived
+  if (existingVideo.status !== 'published' && user?.role !== 'admin') {
+    throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
+  }
+
   // 1. Phân định quyền truy cập luồng phát (FULL vs TEASER)
   let accessLevel: StreamAccessLevel = STREAM_ACCESS_LEVELS.TEASER;
 
@@ -513,14 +600,47 @@ export async function getDynamicHlsPlaylistService(
     }
   }
 
-  // 2. Trả về luồng HLS trực tiếp từ Bunny Stream CDN
+  // 2. Lấy URL luồng HLS từ Bunny Stream CDN
   const playlistUrl = getBunnyHlsUrl(existingVideo.storagePath || existingVideo.id);
 
-  return {
-    content: playlistUrl,
-    playlistUrl,
-    accessLevel,
-  };
+  // 3. Express Proxy: Tải và chuẩn hóa file M3U8 từ Bunny CDN (Cắt ngắn nếu TEASER, giữ nguyên nếu FULL)
+  try {
+    const targetVariant = variant ? variant : 'playlist.m3u8';
+    const targetCdnUrl = playlistUrl.replace(/playlist\.m3u8$/i, targetVariant.replace(/^\/+/, ''));
+
+    const cdnRes = await fetch(targetCdnUrl, {
+      headers: {
+        Referer: process.env.CLIENT_FE_URL || '',
+        'User-Agent': 'EduSpace-Backend/1.0',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!cdnRes.ok) {
+      console.warn(`[HLS PROXY WARN] Bunny CDN trả về HTTP ${cdnRes.status} cho URL: ${targetCdnUrl}`);
+      throw new AppError('Không thể nạp luồng phát video từ máy chủ lưu trữ (CDN)', 502);
+    }
+
+    const originalM3u8 = await cdnRes.text();
+    // Nếu có quyền FULL -> Không cắt thời lượng (999,999s), chỉ chuẩn hóa URL tuyệt đối
+    // Nếu chỉ có quyền TEASER -> Cắt theo teaserDuration của video
+    const teaserDurationSec = accessLevel === STREAM_ACCESS_LEVELS.FULL
+      ? 9999999
+      : (existingVideo.teaserDuration || 180);
+
+    const baseUrl = targetCdnUrl.substring(0, targetCdnUrl.lastIndexOf('/'));
+    const truncatedContent = truncateHlsVariantPlaylist(originalM3u8, teaserDurationSec, baseUrl);
+
+    return {
+      content: truncatedContent,
+      playlistUrl: '', // Đặt rỗng để controller gửi HTTP 200 thay vì redirect 302 gây lỗi CORS
+      accessLevel,
+    };
+  } catch (proxyErr: any) {
+    console.error('[HLS PROXY ERROR]', proxyErr?.message || proxyErr);
+    if (proxyErr instanceof AppError) throw proxyErr;
+    throw new AppError('Lỗi kết nối tới máy chủ lưu trữ luồng phát video', 502);
+  }
 }
 
 

@@ -139,6 +139,28 @@ export function getBunnyHlsUrl(videoId: string): string {
 }
 
 /**
+ * Tạo URL nhúng Iframe Player chính chủ Bunny Stream (Bảo mật 100%, hỗ trợ HLS 360p-1080p)
+ * @param videoId GUID video hoặc đường dẫn lưu trữ
+ */
+export function getBunnyEmbedUrl(videoId: string): string {
+  if (!videoId) return '';
+
+  if (videoId.startsWith('http://') || videoId.startsWith('https://')) {
+    return videoId;
+  }
+
+  const { libraryId } = getBunnyConfig();
+  let cleanId = videoId.replace(/^bunny:\/\//, '').trim();
+
+  const guidMatch = cleanId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (guidMatch) {
+    cleanId = guidMatch[0];
+  }
+
+  return `https://iframe.mediadelivery.net/embed/${libraryId}/${cleanId}?autoplay=true&loop=false&muted=false&preload=true`;
+}
+
+/**
  * Lấy thông tin và trạng thái mã hóa thực tế của video trên Bunny Stream REST API
  * @param videoId GUID video trên Bunny Stream
  */
