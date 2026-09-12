@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { SYSTEM_FEATURE_CODES, SYSTEM_FEATURE_METADATA } from '../src/modules/features/constants';
 import { DEFAULT_PAYMENT_METHODS } from '../src/modules/paymentMethods/constants';
+import { DEFAULT_BLOG_TYPES } from '../src/modules/blogTypes/constants';
 
 const prisma = new PrismaClient();
 // ==========================================
@@ -162,6 +163,29 @@ async function seedVideoTypes() {
   console.log(`Seeded/Updated ${count} video types.`);
 }
 
+/**
+ * 5. Seed Blog Types
+ */
+async function seedBlogTypes() {
+  let count = 0;
+  for (const bt of DEFAULT_BLOG_TYPES) {
+    await prisma.blogType.upsert({
+      where: { code: bt.code },
+      update: {
+        name: bt.name,
+        description: bt.description,
+      },
+      create: {
+        code: bt.code,
+        name: bt.name,
+        description: bt.description,
+      },
+    });
+    count++;
+  }
+  console.log(`Seeded/Updated ${count} blog types.`);
+}
+
 // ==========================================
 // MAIN EXECUTION PIPELINE
 // ==========================================
@@ -179,6 +203,9 @@ async function main() {
 
   // 4. Seed Video Types
   await seedVideoTypes();
+
+  // 5. Seed Blog Types
+  await seedBlogTypes();
 
   console.log('Database seeding completed successfully!');
 }
