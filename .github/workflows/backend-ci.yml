@@ -35,13 +35,14 @@ jobs:
         run: npm run build
 
   docker-build-push:
-    name: Build & Push Docker Image
+    name: Build, Scan & Push Docker Image
     needs: ci-build-check
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Checkout Code
@@ -78,3 +79,14 @@ jobs:
           # Bật cache của GitHub Actions để tăng tốc build Docker
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Quét lỗ hổng bảo mật Docker Image bằng Trivy Scanner
+      - name: Run Trivy Security Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
