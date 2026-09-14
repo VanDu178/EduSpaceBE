@@ -1,40 +1,54 @@
-# Stage 1: Build stage
-FROM node:20-alpine AS builder
-
+# ==========================================
+# Stage 1: Install dependencies
+# ==========================================
+FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy dependency files
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install all dependencies (including devDependencies needed for build)
+# Cài đầy đủ dependencies (bao gồm devDeps để build)
 RUN npm ci
 
-# Copy source code
+# ==========================================
+# Stage 2: Build source code
+# ==========================================
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate Prisma Client & compile TypeScript
+# Generate Prisma Client & build TypeScript
 RUN npx prisma generate
 RUN npm run build
 
-# Remove devDependencies to minimize image size
+# Dọn dẹp devDependencies an toàn sau khi đã build xong
+# Nếu dự án dùng tsx/ts-node runtime thì giữ lại, nếu build ra JS thuần ở dist/ thì prune
 RUN npm prune --production
 
-# Stage 2: Production runner stage
+# ==========================================
+# Stage 3: Production Runner
+# ==========================================
 FROM node:20-alpine AS runner
-
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Copy package info, production dependencies, built code and prisma migrations
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
+# Thêm wget/curl để phục vụ healthcheck nếu cần
+RUN apk add --no-cache openssl
+
+# Tạo group/user node nếu image base chưa map đủ quyền (alpine mặc định có user node)
+COPY --from=builder --chown=node:node /app/package*.json ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder --chown=node:node /app/prisma ./prisma
+
+USER node
 
 EXPOSE 5000
 
-# Execute database migrations and start production server
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+# Chạy migration rồi start app
+CMD ["sh", "-c", "npx prisma migrate deploy && exec npm run start"]
