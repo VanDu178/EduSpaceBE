@@ -1,5 +1,5 @@
 /**
- * HẰNG SỐ CHUẨN DUY NHẤT DÙNG CHO CÁC MÃ THỂ LOẠI BÀI VIẾT (BLOG TYPE CODES)
+ * HẰNG SỐ CHUẨN DUY NHẤT DÙNG CHO CÁC MÃ THỂ LOẠI BÀI VIẾT
  * Tất cả các mã đều viết dưới dạng IN HOA (UPPERCASE)
  */
 export interface DefaultBlogType {
