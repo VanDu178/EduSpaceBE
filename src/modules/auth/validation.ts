@@ -431,8 +431,13 @@ export const validateChangePasswordData = async (
 /**
  * Validate dữ liệu refresh token.
  */
-export const validateTokenRefreshData = async (cookies: any) => {
-  const { refreshToken } = cookies || {};
+export const validateTokenRefreshData = async (cookies: any, cookieName: string = 'refreshToken') => {
+  let refreshToken: string | undefined = cookies?.[cookieName];
+
+  // Chỉ cho phép fallback về 'refreshToken' chung (legacy compatibility) nếu không tìm thấy cookie theo cookieName
+  if (!refreshToken && cookieName !== 'refreshToken') {
+    refreshToken = cookies?.refreshToken;
+  }
 
   if (!refreshToken) {
     throw new AppError(
@@ -507,8 +512,11 @@ export const validateTokenRefreshData = async (cookies: any) => {
 /**
  * Validate dữ liệu logout.
  */
-export const validateLogoutData = (cookies: any) => {
-  const { refreshToken } = cookies || {};
+export const validateLogoutData = (cookies: any, cookieName: string = 'refreshToken') => {
+  let refreshToken: string | undefined = cookies?.[cookieName];
+  if (!refreshToken && cookieName !== 'refreshToken') {
+    refreshToken = cookies?.refreshToken;
+  }
   return { refreshToken };
 };
 

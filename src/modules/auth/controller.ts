@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess } from '../../utils/responseHelper';
 import type { AuthenticatedRequest } from '../../middlewares/authMiddleware';
-import { REFRESH_TOKEN_COOKIE_OPTIONS } from '../../config/jwt';
+import { REFRESH_TOKEN_COOKIE_OPTIONS, getCookieName } from '../../config/jwt';
 import {
   validateRegisterData,
   validateLoginData,
@@ -51,7 +51,8 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const user = await validateLoginData(req.body);
   const result = await loginService(user);
-  res.cookie('refreshToken', result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+  const cookieName = getCookieName(req);
+  res.cookie(cookieName, result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
   return sendSuccess(
     res,
     {
@@ -68,7 +69,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 export const googleLogin = asyncHandler(async (req: Request, res: Response) => {
   const googleData = await validateGoogleLoginData(req.body);
   const result = await googleLoginService(googleData);
-  res.cookie('refreshToken', result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+  const cookieName = getCookieName(req);
+  res.cookie(cookieName, result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
   return sendSuccess(
     res,
     { accessToken: result.accessToken, user: result.user },
@@ -124,13 +126,14 @@ export const changePassword = asyncHandler(
  * Xoay vòng Refresh Token (Token Refresh / Rotation).
  */
 export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => {
+  const cookieName = getCookieName(req);
   try {
-    const validationResult: any = await validateTokenRefreshData(req.cookies);
+    const validationResult: any = await validateTokenRefreshData(req.cookies, cookieName);
 
     // Nếu rơi vào Grace Period (Request trùng do Race Condition / Multi-tab trong 15s)
     if (validationResult.isGracePeriod) {
       res.cookie(
-        'refreshToken',
+        cookieName,
         validationResult.newRefreshToken,
         REFRESH_TOKEN_COOKIE_OPTIONS
       );
@@ -147,7 +150,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
     const { savedToken, user } = validationResult;
     const result = await tokenRefreshService(savedToken, user);
     res.cookie(
-      'refreshToken',
+      cookieName,
       result.newRefreshToken,
       REFRESH_TOKEN_COOKIE_OPTIONS
     );
@@ -157,7 +160,7 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
       'Token refresh thành công'
     );
   } catch (error) {
-    res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
+    res.clearCookie(cookieName, REFRESH_TOKEN_COOKIE_OPTIONS);
     throw error;
   }
 });
@@ -166,9 +169,10 @@ export const tokenRefresh = asyncHandler(async (req: Request, res: Response) => 
  * Đăng xuất tài khoản.
  */
 export const logout = asyncHandler(async (req: Request, res: Response) => {
-  const { refreshToken } = validateLogoutData(req.cookies);
+  const cookieName = getCookieName(req);
+  const { refreshToken } = validateLogoutData(req.cookies, cookieName);
   await logoutService(refreshToken);
-  res.clearCookie('refreshToken', REFRESH_TOKEN_COOKIE_OPTIONS);
+  res.clearCookie(cookieName, REFRESH_TOKEN_COOKIE_OPTIONS);
   return sendSuccess(res, null, 'Đăng xuất thành công');
 });
 
