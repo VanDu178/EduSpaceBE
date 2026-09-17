@@ -312,6 +312,7 @@ export async function validateGetHlsPlaylist(
     where: whereClause as any,
   });
 
+
   if (!existingVideo) {
     throw new AppError('Không tìm thấy thông tin video', 404, VIDEO_ERROR_CODES.NOT_FOUND);
   }

@@ -3,7 +3,7 @@ import { AppError } from '../../utils/appError';
 import { deleteFromSupabase, extractStoragePath } from '../../services/supabaseStorageService';
 import { VIDEO_ERROR_CODES, STREAM_ACCESS_LEVELS, StreamAccessLevel, SOURCE_TYPES } from './constants';
 import { evaluateResourceAccess } from '../../services/resourceAccessEngine';
-import { deleteBunnyVideo, getBunnyHlsUrl, getBunnyEmbedUrl, getBunnyVideoDetails } from '../../services/bunnyStreamService';
+import { deleteBunnyVideo, getBunnyHlsUrl, getBunnyEmbedUrl, getBunnyVideoDetails, getBunnyConfig } from '../../services/bunnyStreamService';
 import { truncateHlsVariantPlaylist } from './utils';
 import { completeUploadSessionService } from '../upload/services';
 
@@ -360,9 +360,11 @@ export async function updateVideoService(existingVideo: any, validatedData: any)
 
       if (otherVideoCount === 0) {
         const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        const currentCdnHost = getBunnyConfig().cdnHostname;
         if (
           existingVideo.storagePath.includes('bunny://') ||
           existingVideo.storagePath.includes('b-cdn.net') ||
+          (Boolean(currentCdnHost) && existingVideo.storagePath.includes(currentCdnHost)) ||
           bunnyMatch
         ) {
           const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
@@ -486,9 +488,11 @@ export async function deleteVideoService(existingVideo: any) {
 
       if (otherVideoCount === 0) {
         const bunnyMatch = existingVideo.storagePath.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        const currentCdnHost = getBunnyConfig().cdnHostname;
         if (
           existingVideo.storagePath.includes('bunny://') ||
           existingVideo.storagePath.includes('b-cdn.net') ||
+          (Boolean(currentCdnHost) && existingVideo.storagePath.includes(currentCdnHost)) ||
           bunnyMatch
         ) {
           const videoId = bunnyMatch ? bunnyMatch[0] : existingVideo.storagePath.replace(/^bunny:\/\//, '').split('/')[0];
